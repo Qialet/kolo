@@ -28,6 +28,7 @@ import { dist, type Vec2 } from '../geometry.js';
 import { createRng, type Rng } from '../rng.js';
 import { CANCEL_REASONS_PASSENGER, DISPUTE_REASONS, passengerName } from './names.js';
 import { cycleOf, signalState } from './signals.js';
+import { Roaming } from './roaming.js';
 import { makeVehicle, TrafficSystem, type Vehicle } from './traffic.js';
 
 export interface FleetVehicleSeed {
@@ -138,7 +139,9 @@ interface SimOrder {
 /** Web Crypto is global in both Node and browsers; the package targets neither lib explicitly. */
 declare const crypto: { randomUUID(): string };
 
-const MAX_CARS = 110;
+const MAX_CARS = 300;
+/** Places that free taxis wait at (busier ones only). */
+const HOTSPOT_WEIGHT = 2;
 const BASE_ORDERS_PER_MIN = 3.2;
 const FARE = { start: 230, perKm: 95, perMin: 18 };
 const SUBSTEP = 0.05;
@@ -147,7 +150,7 @@ export class Simulation {
   readonly traffic: TrafficSystem;
   readonly taxis = new Map<string, Taxi>();
   readonly buses = new Map<string, Bus>();
-  readonly cars = new Set<Vehicle>();
+  readonly roaming: Roaming;
   readonly orders = new Map<string, SimOrder>();
   private readonly rng: Rng;
   private readonly hooks: SimHooks;
@@ -155,7 +158,6 @@ export class Simulation {
   private readonly hotspots: Place[] = [];
   private readonly slotUse = new Map<string, (string | null)[]>();
   private readonly boxUse = new Map<string, (string | null)[]>();
-  private carSeq = 0;
   private orderSeq = 10000;
   private eventSeq = 0;
   private dispatchClock = 0;
@@ -181,15 +183,16 @@ export class Simulation {
     for (const st of city.busStops) {
       this.places.set(st.id, { id: st.id, label: `Остановка «${st.name}»`, lane: st.lane, s: Math.max(8, st.s - 20), x: st.x, z: st.z });
     }
-    for (const poi of city.pois) this.hotspots.push(this.places.get(poi.addressId)!);
+    for (const poi of city.pois) if (poi.weight >= HOTSPOT_WEIGHT) this.hotspots.push(this.places.get(poi.addressId)!);
     for (const st of city.busStops) this.hotspots.push(this.places.get(st.id)!);
     for (const d of city.depots) {
       this.slotUse.set(d.id, d.slots.map(() => null));
       this.boxUse.set(d.id, d.boxes.map(() => null));
     }
+    this.roaming = new Roaming(this.traffic, this.rng);
     this.spawnFleet(fleet);
     this.spawnBuses();
-    this.adjustCars(true);
+    this.roaming.update(this.carTarget, true);
   }
 
   // ───────────────────────────── setup ─────────────────────────────
@@ -269,27 +272,14 @@ export class Simulation {
     this.traffic.appendSegments(bus.v, segs, true);
   }
 
-  private adjustCars(initial = false) {
-    const target = Math.round(MAX_CARS * this.trafficDensity);
-    let attempts = 0;
-    while (this.cars.size < target && attempts++ < (initial ? 2000 : 3)) {
-      const lane = this.rng.pick(this.city.lanes);
-      const s = initial ? this.rng.range(8, lane.length - 12) : this.rng.range(8, 30);
-      const crowded = this.traffic.vehicles.some(
-        (o) => (o.mode === 'lane' || o.mode === 'pulled') && o.lane === lane.id && Math.abs(o.s - s) < 14,
-      );
-      if (crowded) continue;
-      const v = makeVehicle(`C${++this.carSeq}`, 'CAR', this.rng);
-      this.traffic.placeOnLane(v, lane.id, s);
-      v.speed = this.city.segments[lane.seg]!.speed * 0.5;
-      if (!this.traffic.extendTo(v, this.randomSegment())) continue;
-      this.traffic.add(v);
-      this.cars.add(v);
-    }
+  /** Background cars wanted at the current density. */
+  get carTarget() {
+    return Math.round(MAX_CARS * this.trafficDensity);
   }
 
-  private randomSegment() {
-    return this.rng.int(0, this.city.segments.length - 1);
+  /** Background cars on the map (they enter and leave through the district frame). */
+  get cars(): ReadonlySet<Vehicle> {
+    return this.roaming.cars;
   }
 
   private claim(map: Map<string, (string | null)[]>, depotId: string, taxiId: string): number {
@@ -324,19 +314,11 @@ export class Simulation {
     const t = this.traffic.t;
     for (const taxi of this.taxis.values()) this.updateTaxi(taxi, t);
     for (const bus of this.buses.values()) this.updateBus(bus, t);
-    for (const car of this.cars) {
-      if (!car.pathEnded) continue;
-      if (this.cars.size > Math.round(MAX_CARS * this.trafficDensity)) {
-        this.cars.delete(car);
-        this.traffic.remove(car);
-      } else {
-        this.traffic.extendTo(car, this.randomSegment());
-      }
-    }
+    this.roaming.step(this.carTarget);
     this.dispatchClock += dt;
     if (this.dispatchClock >= 1) {
       this.dispatchClock = 0;
-      this.adjustCars();
+      this.roaming.update(this.carTarget);
       this.updateOrders(t);
       this.maybeBreakdown();
       this.lifecycle();
@@ -600,7 +582,7 @@ export class Simulation {
 
   private pickOrigin(): Place {
     const r = this.rng.next();
-    if (r < 0.4) return this.places.get(this.rng.pick(this.city.busStops).id)!;
+    if (r < 0.4 && this.city.busStops.length) return this.places.get(this.rng.pick(this.city.busStops).id)!;
     if (r < 0.7) {
       const total = this.city.pois.reduce((a, p) => a + p.weight, 0);
       let x = this.rng.range(0, total);

@@ -11,23 +11,25 @@ function fleet(n: number): FleetVehicleSeed[] {
     model: 'Škoda Octavia',
     parkId: ['P1', 'P2', 'P3'][i % 3]!,
     parkName: 'Park',
-    fleetStatus: i < n - 4 ? 'ON_LINE' : i < n - 1 ? 'IN_PARK' : 'MAINTENANCE',
+    fleetStatus: i < n * 0.8 ? 'ON_LINE' : i < n * 0.95 ? 'IN_PARK' : 'MAINTENANCE',
     driverName: 'Test Driver',
     driverRating: 4.8,
   }));
 }
 
 const REAL = new URL('../../../../data/districts/belgrade-center.json', import.meta.url);
-const buildCity = () => buildCityFromDistrict(JSON.parse(readFileSync(REAL, 'utf8')) as District);
+const city = buildCityFromDistrict(JSON.parse(readFileSync(REAL, 'utf8')) as District);
+const buildCity = () => city;
 
 describe('Simulation', () => {
-  it('runs ten minutes of city life without collisions, NaNs or gridlock', () => {
+  it('runs fifteen minutes of city life without collisions, NaNs or gridlock', () => {
     const city = buildCity();
     const events: string[] = [];
-    const sim = new Simulation(city, fleet(30), { hooks: { onOrderEvent: (_o, e) => events.push(e.type) } });
+    expect(city.busStops).toHaveLength(0);
+    const sim = new Simulation(city, fleet(60), { hooks: { onOrderEvent: (_o, e) => events.push(e.type) } });
     let overlaps = 0;
     let checks = 0;
-    for (let i = 0; i < 600 * 20; i++) {
+    for (let i = 0; i < 900 * 20; i++) {
       sim.step(0.05);
       if (i % 100 !== 0) continue;
       const byLane = new Map<number, { s: number; len: number }[]>();
@@ -47,14 +49,16 @@ describe('Simulation', () => {
       }
     }
     const kpi = sim.kpi();
+    const stuck = sim.traffic.vehicles.filter((v) => (v.mode === 'lane' || v.mode === 'conn') && v.stoppedFor > 120);
+    expect(stuck.map((v) => v.id)).toEqual([]);
     expect(overlaps / Math.max(1, checks)).toBeLessThan(0.002);
     expect(kpi.avgSpeedKmh).toBeGreaterThan(8);
     expect(kpi.congestion).toBeLessThan(0.5);
     expect(events).toContain('CREATED');
     expect(events).toContain('PICKED_UP');
-    expect(kpi.orders.completed).toBeGreaterThan(3);
+    expect(kpi.orders.completed).toBeGreaterThan(5);
     const frame = sim.frame();
-    expect(frame.vehicles.length).toBeGreaterThan(80);
+    expect(frame.vehicles.length).toBeGreaterThan(200);
   });
 
   it('prices orders by road distance and reports trip progress along the driven route', () => {
@@ -94,7 +98,7 @@ describe('Simulation', () => {
     const sim = new Simulation(city, fleet(6), { trafficDensity: 0.2, demand: 0 });
     sim.setFleetStatus('T1', 'MAINTENANCE');
     let reached = false;
-    for (let i = 0; i < 20 * 400 && !reached; i++) {
+    for (let i = 0; i < 20 * 900 && !reached; i++) {
       sim.step(0.05);
       reached = sim.taxiDetail('T1')!.activity === 'IN_SERVICE';
     }
