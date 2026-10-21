@@ -21,7 +21,7 @@ const KIND = { TAXI: 0, CAR: 1, BUS: 2 } as const;
 
 const tmp = new THREE.Object3D();
 /** Moving instances: raycasting must not rely on a bounding sphere cached at first use. */
-const WORLD_SPHERE = new THREE.Sphere(new THREE.Vector3(0, 0, 0), 2000);
+const WORLD_SPHERE = new THREE.Sphere(new THREE.Vector3(0, 0, 0), 5000);
 const TAIL_ON = new THREE.Color('#FF2D3D');
 const TAIL_OFF = new THREE.Color('#7A2530');
 const SIGN_FREE = new THREE.Color(palette.green);
@@ -284,7 +284,7 @@ export function ParkedCars({ city }: { city: City }) {
     const colors = palette.cars.map((x) => new THREE.Color(x).lerp(PARKED_DUST, 0.25));
     city.parkedCars.forEach((car, i) => {
       // Sidewalk level, same 15% upscale as moving vehicles.
-      tmp.position.set(car.x, 0.17, car.z);
+      tmp.position.set(car.x, -0.12, car.z);
       tmp.rotation.set(0, car.heading, 0);
       tmp.scale.setScalar(1.15);
       tmp.updateMatrix();

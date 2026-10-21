@@ -20,6 +20,11 @@ export const palette = {
   trunk: '#8E8A84',
   park: '#DCE6E1',
   lawn: '#D3E2D9',
+  forest: '#C8D9CF',
+  pitch: '#CFE1D2',
+  water: '#C6D9EA',
+  plaza: '#E8EBF0',
+  parking: '#D8DDE5',
   shed: '#DDE2EA',
   // Courtyard playgrounds: warm sand and muted pastel equipment, quiet next to the accents.
   playPad: '#EEE4D4',

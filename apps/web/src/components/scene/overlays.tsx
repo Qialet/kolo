@@ -9,6 +9,7 @@ import * as THREE from 'three';
 import { palette } from '@/lib/palette';
 import { useBus, useOrder, useTaxi } from '@/lib/queries';
 import { useUi } from '@/lib/ui-store';
+import { flatPolygon } from './city-geometry';
 import { livePoses } from './vehicles';
 
 /** 3D parts of the selection overlay (rings, routes, outlines). Text lives in SceneLabels. */
@@ -138,10 +139,10 @@ function BuildingOutline({ city, id }: { city: City; id: string }) {
 
 function DepotOutline({ city, id }: { city: City; id: string }) {
   const d = city.depots.find((x) => x.id === id);
-  if (!d) return null;
+  const geo = useMemo(() => (d ? flatPolygon(d.lot, [], 0.05, palette.depot) : null), [d]);
+  if (!geo) return null;
   return (
-    <mesh position={[(d.lot.x0 + d.lot.x1) / 2, 0.23, (d.lot.z0 + d.lot.z1) / 2]} rotation-x={-Math.PI / 2}>
-      <planeGeometry args={[d.lot.x1 - d.lot.x0, d.lot.z1 - d.lot.z0]} />
+    <mesh geometry={geo}>
       <meshBasicMaterial color={palette.depot} transparent opacity={0.14} depthWrite={false} />
     </mesh>
   );

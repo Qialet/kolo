@@ -100,6 +100,15 @@ function ConsoleBody() {
           <OpsPanel />
         </div>
       </div>
+      {/* Map data licence (ODbL) requires visible attribution. */}
+      <a
+        href="https://www.openstreetmap.org/copyright"
+        target="_blank"
+        rel="noreferrer"
+        className="absolute bottom-0.5 left-1/2 -translate-x-1/2 rounded bg-white/60 px-1.5 text-[10px] text-muted-foreground"
+      >
+        © OpenStreetMap contributors
+      </a>
       <CreateOrderDialog />
       <CommandSearch open={searchOpen} onOpenChange={setSearchOpen} />
     </main>

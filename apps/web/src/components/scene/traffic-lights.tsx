@@ -2,7 +2,7 @@
 
 import { useFrame, type ThreeEvent } from '@react-three/fiber';
 import { LIGHT_ASPECTS } from '@kolo/contracts';
-import { headingOf, STOP_SETBACK, type City } from '@kolo/sim';
+import { endTangent, headingOf, poseAlong, type City } from '@kolo/sim';
 import { useLayoutEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { frameBuffer } from '@/lib/live';
@@ -16,11 +16,11 @@ interface Approach {
   x: number;
   z: number;
   heading: number;
-  /** Stop bar centre and size. */
+  /** Stop bar centre, width across the approach and its heading. */
   barX: number;
   barZ: number;
   barW: number;
-  barD: number;
+  barHeading: number;
 }
 
 const tmp = new THREE.Object3D();
@@ -38,25 +38,25 @@ function approachesOf(city: City): Approach[] {
     if (!node.signal) continue;
     for (const segId of node.in) {
       const seg = city.segments[segId]!;
-      const street = city.streets[seg.street]!;
-      const d = seg.dirIn;
-      const right = { x: -d.z, z: d.x };
-      const half = seg.axis === 'NS' ? node.halfZ : node.halfX;
-      const back = half + 1.2;
-      const side = street.halfWidth + 1.4;
-      const bar = half + STOP_SETBACK + 0.2;
-      const laneSpan = street.halfWidth - street.median;
-      const off = street.median + laneSpan / 2;
+      const w = city.streets[seg.street]!.laneWidth;
+      const lanes = seg.lanes.map((l) => city.lanes[l]!);
+      const curb = lanes[lanes.length - 1]!;
+      const inner = lanes[0]!;
+      const d = endTangent(curb.line);
+      // Pole on the kerb just before the stop line, bar across all lanes of the approach.
+      const pole = poseAlong(curb.line, curb.length - 1.2, w / 2 + 1.4);
+      const a = poseAlong(inner.line, inner.length + 0.2, -w / 2);
+      const b = poseAlong(curb.line, curb.length + 0.2, w / 2);
       out.push({
         node: node.id,
         phase: seg.phase,
-        x: node.x - d.x * back + right.x * side,
-        z: node.z - d.z * back + right.z * side,
+        x: pole.x,
+        z: pole.z,
         heading: headingOf({ x: -d.x, z: -d.z }),
-        barX: node.x - d.x * bar + right.x * off,
-        barZ: node.z - d.z * bar + right.z * off,
-        barW: seg.axis === 'NS' ? laneSpan : 0.5,
-        barD: seg.axis === 'NS' ? 0.5 : laneSpan,
+        barX: (a.x + b.x) / 2,
+        barZ: (a.z + b.z) / 2,
+        barW: Math.hypot(b.x - a.x, b.z - a.z),
+        barHeading: headingOf(d),
       });
     }
   }
@@ -108,9 +108,9 @@ export function TrafficLights({ city }: { city: City }) {
         ref.current?.setMatrixAt(i, tmp.matrix);
         ref.current?.setColorAt(i, OFF);
       });
-      tmp.rotation.set(0, 0, 0);
+      tmp.rotation.set(0, a.barHeading, 0);
       tmp.position.set(a.barX, 0.045, a.barZ);
-      tmp.scale.set(a.barW, 1, a.barD);
+      tmp.scale.set(a.barW, 1, 0.5);
       tmp.updateMatrix();
       bars.current?.setMatrixAt(i, tmp.matrix);
       bars.current?.setColorAt(i, BAR_RED);

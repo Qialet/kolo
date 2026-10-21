@@ -1,12 +1,11 @@
 'use client';
 
-import type { ThreeEvent } from '@react-three/fiber';
-import type { Building, City } from '@kolo/sim';
+import type { City } from '@kolo/sim';
 import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { palette } from '@/lib/palette';
 import { useUi } from '@/lib/ui-store';
-import { buildDepotMarkings, buildGroundGeometry, buildMarkingsGeometry, buildPlaygroundGeometry, unitBuildingGeometry, withWindows } from './city-geometry';
+import { buildDepotGeometry, buildGroundGeometry, buildMarkingsGeometry, buildPlaygroundGeometry, buildRoadGeometry, flatPolygon, LEVEL } from './city-geometry';
 
 const tmp = new THREE.Object3D();
 const color = new THREE.Color();
@@ -15,7 +14,6 @@ export function CityStatic({ city }: { city: City }) {
   return (
     <group>
       <Ground city={city} />
-      <Buildings city={city} />
       <Trees city={city} />
       <Playgrounds city={city} />
       <Depots city={city} />
@@ -26,87 +24,33 @@ export function CityStatic({ city }: { city: City }) {
 
 function Ground({ city }: { city: City }) {
   const ground = useMemo(() => buildGroundGeometry(city), [city]);
+  const roads = useMemo(() => buildRoadGeometry(city), [city]);
   const markings = useMemo(() => buildMarkingsGeometry(city), [city]);
-  const slots = useMemo(() => buildDepotMarkings(city), [city]);
+  const depots = useMemo(() => buildDepotGeometry(city), [city]);
+  const b = city.bounds;
   return (
     <group>
-      {/* Asphalt everywhere; blocks sit on top of it. */}
-      <mesh rotation-x={-Math.PI / 2} receiveShadow>
-        <planeGeometry args={[1300, 1300]} />
-        <meshStandardMaterial color={palette.asphalt} roughness={1} />
-      </mesh>
       {/* Soft surroundings beyond the district. */}
-      <mesh rotation-x={-Math.PI / 2} position-y={-0.05}>
-        <planeGeometry args={[6000, 6000]} />
+      <mesh rotation-x={-Math.PI / 2} position={[(b.x0 + b.x1) / 2, LEVEL.ground - 0.05, (b.z0 + b.z1) / 2]}>
+        <planeGeometry args={[12000, 12000]} />
         <meshStandardMaterial color={palette.sky} roughness={1} />
       </mesh>
-      <mesh geometry={ground} receiveShadow castShadow={false}>
+      <mesh geometry={ground} receiveShadow>
+        <meshStandardMaterial vertexColors roughness={0.95} />
+      </mesh>
+      <mesh geometry={roads} receiveShadow>
+        <meshStandardMaterial vertexColors roughness={1} />
+      </mesh>
+      <mesh geometry={depots.lots} receiveShadow>
         <meshStandardMaterial vertexColors roughness={0.95} />
       </mesh>
       <mesh geometry={markings} receiveShadow>
         <meshStandardMaterial vertexColors roughness={0.8} transparent opacity={0.92} polygonOffset polygonOffsetFactor={-2} />
       </mesh>
-      <mesh geometry={slots}>
+      <mesh geometry={depots.lines}>
         <meshStandardMaterial vertexColors roughness={0.8} transparent opacity={0.7} polygonOffset polygonOffsetFactor={-2} />
       </mesh>
     </group>
-  );
-}
-
-const buildingTint = (b: Building) => {
-  if (b.kind === 'garage') return '#FFE2D6';
-  if (b.kind === 'depot-office') return '#E6E0FF';
-  if (b.kind === 'poi') return palette.poiTint;
-  if (b.kind === 'stall') return '#FFFFFF';
-  if (b.kind === 'shed') return palette.shed;
-  return palette.buildingTints[b.tint % palette.buildingTints.length]!;
-};
-
-function Buildings({ city }: { city: City }) {
-  const ref = useRef<THREE.InstancedMesh>(null);
-  const geometry = useMemo(() => unitBuildingGeometry(), []);
-  const material = useMemo(() => withWindows(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0 })), []);
-  const select = useUi((s) => s.select);
-  const hover = useUi((s) => s.hover);
-  const selection = useUi((s) => s.selection);
-
-  useEffect(() => {
-    const mesh = ref.current;
-    if (!mesh) return;
-    city.buildings.forEach((b, i) => {
-      tmp.position.set(b.x, 0.2, b.z);
-      tmp.scale.set(b.w, b.h, b.d);
-      tmp.rotation.set(0, 0, 0);
-      tmp.updateMatrix();
-      mesh.setMatrixAt(i, tmp.matrix);
-      color.set(buildingTint(b));
-      if (selection?.kind === 'building' && selection.id === b.id) color.set('#FFF1C2');
-      mesh.setColorAt(i, color);
-    });
-    mesh.instanceMatrix.needsUpdate = true;
-    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-    mesh.computeBoundingSphere();
-  }, [city, selection]);
-
-  const onClick = (e: ThreeEvent<MouseEvent>) => {
-    e.stopPropagation();
-    const b = e.instanceId !== undefined ? city.buildings[e.instanceId] : undefined;
-    if (b) select({ kind: 'building', id: b.id });
-  };
-
-  return (
-    <instancedMesh
-      ref={ref}
-      args={[geometry, material, city.buildings.length]}
-      castShadow
-      receiveShadow
-      onClick={onClick}
-      onPointerOver={(e) => {
-        e.stopPropagation();
-        hover(e.instanceId !== undefined ? `building:${city.buildings[e.instanceId]?.id}` : null);
-      }}
-      onPointerOut={() => hover(null)}
-    />
   );
 }
 
@@ -125,13 +69,13 @@ function Trees({ city }: { city: City }) {
   useEffect(() => {
     city.trees.forEach((t, i) => {
       tmp.rotation.set(0, (i * 1.37) % Math.PI, 0);
-      tmp.position.set(t.x, 0.2 + t.h * 0.62, t.z);
+      tmp.position.set(t.x, LEVEL.ground + t.h * 0.62, t.z);
       tmp.scale.set(t.r, t.h * 0.42, t.r);
       tmp.updateMatrix();
       crowns.current?.setMatrixAt(i, tmp.matrix);
       color.set(i % 3 === 0 ? palette.treeDark : palette.tree);
       crowns.current?.setColorAt(i, color);
-      tmp.position.set(t.x, 0.2 + t.h * 0.2, t.z);
+      tmp.position.set(t.x, LEVEL.ground + t.h * 0.2, t.z);
       tmp.scale.set(0.22, t.h * 0.4, 0.22);
       tmp.updateMatrix();
       trunks.current?.setMatrixAt(i, tmp.matrix);
@@ -159,48 +103,50 @@ function Trees({ city }: { city: City }) {
 
 function Depots({ city }: { city: City }) {
   const select = useUi((s) => s.select);
+  const shapes = useMemo(
+    () =>
+      city.depots.map((d) => ({
+        pick: flatPolygon(d.lot, [], LEVEL.depotLines + 0.01, palette.depot),
+        outline: new THREE.Line(
+          new THREE.BufferGeometry().setFromPoints([...d.lot, d.lot[0]!].map((p) => new THREE.Vector3(p.x, LEVEL.depotLines + 0.02, p.z))),
+          new THREE.LineBasicMaterial({ color: palette.depot }),
+        ),
+      })),
+    [city],
+  );
   return (
     <group>
-      {city.depots.map((depot) => {
-        const lotW = depot.lot.x1 - depot.lot.x0;
-        const lotD = depot.lot.z1 - depot.lot.z0;
-        return (
-          <group key={depot.id}>
-            {/* Invisible pick surface over the lot. */}
-            <mesh
-              position={[(depot.lot.x0 + depot.lot.x1) / 2, 0.24, (depot.lot.z0 + depot.lot.z1) / 2]}
-              rotation-x={-Math.PI / 2}
-              onClick={(e) => {
-                e.stopPropagation();
-                select({ kind: 'depot', id: depot.id });
-              }}
-            >
-              <planeGeometry args={[lotW, lotD]} />
-              <meshBasicMaterial transparent opacity={0} depthWrite={false} />
-            </mesh>
-            {/* Violet boundary of the partner yard. */}
-            <lineSegments position-y={0.26}>
-              <edgesGeometry args={[new THREE.BoxGeometry(lotW - 1, 0.01, lotD - 1).translate((depot.lot.x0 + depot.lot.x1) / 2, 0, (depot.lot.z0 + depot.lot.z1) / 2)]} />
-              <lineBasicMaterial color={palette.depot} />
-            </lineSegments>
-            {/* Coral service box doors. */}
-            {depot.boxes.map((box, i) => {
-              const back = { x: Math.sin(box.heading), z: Math.cos(box.heading) };
-              return (
-                <mesh key={i} position={[box.x - back.x * 8.1, 1.9, box.z - back.z * 8.1]} rotation-y={box.heading}>
-                  <boxGeometry args={[3.6, 3.4, 0.5]} />
-                  <meshStandardMaterial color={palette.service} roughness={0.6} />
-                </mesh>
-              );
-            })}
-            {/* Gate. */}
-            <mesh position={[depot.gate.x, 0.3, depot.gate.z]}>
-              <boxGeometry args={[1.2, 0.6, 1.2]} />
-              <meshStandardMaterial color={palette.depot} />
-            </mesh>
-          </group>
-        );
-      })}
+      {city.depots.map((depot, k) => (
+        <group key={depot.id}>
+          {/* Invisible pick surface over the lot. */}
+          <mesh
+            geometry={shapes[k]!.pick}
+            onClick={(e) => {
+              e.stopPropagation();
+              select({ kind: 'depot', id: depot.id });
+            }}
+          >
+            <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+          </mesh>
+          {/* Violet boundary of the partner yard. */}
+          <primitive object={shapes[k]!.outline} />
+          {/* Coral service box doors on the garage front. */}
+          {depot.boxes.map((box, i) => {
+            const back = { x: Math.sin(box.heading), z: Math.cos(box.heading) };
+            return (
+              <mesh key={i} position={[box.x - back.x * 8.1, 1.9, box.z - back.z * 8.1]} rotation-y={box.heading}>
+                <boxGeometry args={[3.6, 3.4, 0.5]} />
+                <meshStandardMaterial color={palette.service} roughness={0.6} />
+              </mesh>
+            );
+          })}
+          {/* Gate. */}
+          <mesh position={[depot.gate.x, 0.3, depot.gate.z]}>
+            <boxGeometry args={[1.2, 0.6, 1.2]} />
+            <meshStandardMaterial color={palette.depot} />
+          </mesh>
+        </group>
+      ))}
     </group>
   );
 }
@@ -212,7 +158,7 @@ function BusStops({ city }: { city: City }) {
       {city.busStops.map((stop) => (
         <group
           key={stop.id}
-          position={[stop.x, 0.2, stop.z]}
+          position={[stop.x, LEVEL.ground, stop.z]}
           rotation-y={stop.heading}
           onClick={(e) => {
             e.stopPropagation();
@@ -234,11 +180,6 @@ function BusStops({ city }: { city: City }) {
           <mesh position={[0.5, 3.2, -2.6]}>
             <boxGeometry args={[0.7, 0.7, 0.12]} />
             <meshStandardMaterial color={palette.bus} emissive={palette.bus} emissiveIntensity={0.35} />
-          </mesh>
-          {/* Cobalt bay marking on the curb lane (the road is on local +X). */}
-          <mesh position={[3.4, -0.16, 0]} rotation-x={-Math.PI / 2}>
-            <planeGeometry args={[2.6, 13]} />
-            <meshBasicMaterial color={palette.bus} transparent opacity={0.16} depthWrite={false} />
           </mesh>
         </group>
       ))}

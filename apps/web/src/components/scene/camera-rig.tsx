@@ -2,8 +2,10 @@
 
 import { MapControls } from '@react-three/drei';
 import { useFrame, useThree } from '@react-three/fiber';
-import { useEffect, useRef, type ComponentRef } from 'react';
+import type { City } from '@kolo/sim';
+import { useEffect, useMemo, useRef, type ComponentRef } from 'react';
 import * as THREE from 'three';
+import { getCity } from '@/lib/city';
 import { useUi } from '@/lib/ui-store';
 import { livePoses } from './vehicles';
 
@@ -11,6 +13,14 @@ type MapControlsImpl = ComponentRef<typeof MapControls>;
 
 export const HOME_ZOOM = 4.6;
 export const HOME_OFFSET = new THREE.Vector3(330, 370, 330);
+/** The camera may wander this far past the district frame. */
+const PAN_MARGIN = 200;
+
+/** Centre of the district frame: where the camera looks on start and on «home». */
+export function homeOf(city: City) {
+  const b = city.bounds;
+  return new THREE.Vector3((b.x0 + b.x1) / 2, 0, (b.z0 + b.z1) / 2);
+}
 
 interface Anim {
   target: THREE.Vector3;
@@ -26,6 +36,8 @@ export function CameraRig() {
   const follow = useRef<string | null>(null);
   const request = useUi((s) => s.camera);
   const command = useUi((s) => s.cameraCommand);
+  const bounds = getCity().bounds;
+  const home = useMemo(() => homeOf(getCity()), []);
 
   useEffect(() => {
     if (!request) return;
@@ -47,12 +59,12 @@ export function CameraRig() {
     if (command.type === 'home') {
       follow.current = null;
       if (c) {
-        c.target.set(0, 0, 0);
-        camera.position.copy(HOME_OFFSET);
+        c.target.copy(home);
+        camera.position.copy(home).add(HOME_OFFSET);
       }
-      anim.current = { target: new THREE.Vector3(), zoom: HOME_ZOOM, rotate: 0 };
+      anim.current = { target: home.clone(), zoom: HOME_ZOOM, rotate: 0 };
     }
-  }, [command, get]);
+  }, [command, get, home]);
 
   useFrame((state, dt) => {
     const camera = state.camera;
@@ -80,12 +92,22 @@ export function CameraRig() {
       if (settled && !follow.current) anim.current = null;
     }
     c.update();
+    // Keep the view over the district: shift target and camera together.
+    const x = THREE.MathUtils.clamp(c.target.x, bounds.x0 - PAN_MARGIN, bounds.x1 + PAN_MARGIN);
+    const z = THREE.MathUtils.clamp(c.target.z, bounds.z0 - PAN_MARGIN, bounds.z1 + PAN_MARGIN);
+    if (x !== c.target.x || z !== c.target.z) {
+      camera.position.x += x - c.target.x;
+      camera.position.z += z - c.target.z;
+      c.target.x = x;
+      c.target.z = z;
+    }
   });
 
   return (
     <MapControls
       ref={controls}
       makeDefault
+      target={home}
       enableDamping
       dampingFactor={0.12}
       minZoom={0.8}

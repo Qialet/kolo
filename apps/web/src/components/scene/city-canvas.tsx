@@ -5,7 +5,7 @@ import { useMemo } from 'react';
 import * as THREE from 'three';
 import { getCity } from '@/lib/city';
 import { useUi } from '@/lib/ui-store';
-import { CameraRig, HOME_OFFSET, HOME_ZOOM, SceneLights } from './camera-rig';
+import { CameraRig, HOME_OFFSET, HOME_ZOOM, homeOf, SceneLights } from './camera-rig';
 import { CityStatic } from './city-static';
 import { Overlays } from './overlays';
 import { TrafficLights } from './traffic-lights';
@@ -20,7 +20,7 @@ export default function CityCanvas() {
       shadows
       orthographic
       dpr={[1, 2]}
-      camera={{ position: HOME_OFFSET.toArray(), zoom: HOME_ZOOM, near: 1, far: 4000 }}
+      camera={{ position: homeOf(city).add(HOME_OFFSET).toArray(), zoom: HOME_ZOOM, near: 1, far: 4000 }}
       gl={{ antialias: true, alpha: true, toneMapping: THREE.NeutralToneMapping }}
       onPointerMissed={() => select(null)}
     >
