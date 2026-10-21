@@ -9,12 +9,14 @@ import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeom
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { frameBuffer, type VehiclePose } from '@/lib/live';
 import { palette } from '@/lib/palette';
+import { useVehicles } from '@/lib/queries';
 import { useUi } from '@/lib/ui-store';
 
 /** Latest interpolated poses by id, shared with overlays (labels, routes, camera follow). */
 export const livePoses = new Map<string, VehiclePose>();
 
 const MAX = { taxi: 64, car: 160, bus: 16 };
+const HALO_PULSE = 2.4;
 const KIND = { TAXI: 0, CAR: 1, BUS: 2 } as const;
 
 const tmp = new THREE.Object3D();
@@ -27,6 +29,9 @@ const SIGN_PICKUP = new THREE.Color(palette.amber);
 const SIGN_OFF = new THREE.Color('#4A4F5A');
 /** Parked cars are mixed slightly towards the sidewalk tone so moving traffic reads first. */
 const PARKED_DUST = new THREE.Color(palette.sidewalk);
+/** With a partner filter on, other partners' taxis fade towards the street tone. */
+const TAXI_ON = new THREE.Color(palette.taxi);
+const TAXI_DIM = new THREE.Color(palette.taxi).lerp(new THREE.Color(palette.asphalt), 0.72);
 const FREE = TAXI_ACTIVITIES.indexOf('FREE');
 const TO_PICKUP = TAXI_ACTIVITIES.indexOf('TO_PICKUP');
 const AT_PICKUP = TAXI_ACTIVITIES.indexOf('AT_PICKUP');
@@ -62,13 +67,14 @@ function useGeometries() {
     const busRoof = box(2.2, 0.16, 9.5, 0, 2.94, 0, 0.06);
     const busWheels = wheels(1.08, [-3.9, 3.9], 0.5);
     const busTails = mergeGeometries([box(0.4, 0.3, 0.06, -0.9, 0.9, -5.92, 0.03), box(0.4, 0.3, 0.06, 0.9, 0.9, -5.92, 0.03)])!;
-    return { carBody, carCabin, carWheels, tails, sign, busBody, busGlass, busRoof, busWheels, busTails };
+    const halo = new THREE.RingGeometry(3.4, 4.3, 40);
+    return { carBody, carCabin, carWheels, tails, sign, busBody, busGlass, busRoof, busWheels, busTails, halo };
   }, []);
 }
 
 type Group = 'taxi' | 'car' | 'bus';
 type Part =
-  | 'taxiBody' | 'taxiCabin' | 'taxiWheels' | 'taxiTails' | 'taxiSign'
+  | 'taxiBody' | 'taxiCabin' | 'taxiWheels' | 'taxiTails' | 'taxiSign' | 'taxiHalo'
   | 'carBody' | 'carCabin' | 'carWheels' | 'carTails'
   | 'busBody' | 'busGlass' | 'busRoof' | 'busWheels' | 'busTails';
 
@@ -92,8 +98,15 @@ export function Vehicles() {
   const select = useUi((s) => s.select);
   const hover = useUi((s) => s.hover);
   const carColors = useMemo(() => palette.cars.map((x) => new THREE.Color(x)), []);
+  // Partner filter: taxis of the chosen park get a violet halo, the rest fade out.
+  const parkFilter = useUi((s) => s.parkFilter);
+  const fleet = useVehicles();
+  const parkOf = useMemo(() => new Map(fleet.data?.map((v) => [v.id, v.parkId]) ?? []), [fleet.data]);
 
-  useFrame(() => {
+  useFrame(({ clock, camera }) => {
+    let halos = 0;
+    // Roughly constant on screen: larger when zoomed out, never smaller than the car.
+    const pulse = (1 + Math.sin(clock.elapsedTime * HALO_PULSE) * 0.08) * Math.max(1, 7 / camera.zoom);
     const n = frameBuffer.sample(performance.now(), poses.current);
     const counts = { taxi: 0, car: 0, bus: 0 };
     const idLists = ids.current;
@@ -118,6 +131,15 @@ export function Vehicles() {
         meshes.taxiTails?.setColorAt(k, braking ? TAIL_ON : TAIL_OFF);
         const sign = p.activity === FREE ? SIGN_FREE : p.activity === TO_PICKUP || p.activity === AT_PICKUP ? SIGN_PICKUP : SIGN_OFF;
         meshes.taxiSign?.setColorAt(k, sign);
+        const mine = parkFilter !== null && parkOf.get(p.id) === parkFilter;
+        meshes.taxiBody?.setColorAt(k, parkFilter === null || mine ? TAXI_ON : TAXI_DIM);
+        if (mine && meshes.taxiHalo) {
+          tmp.position.set(p.x, 0.26, p.z);
+          tmp.rotation.set(-Math.PI / 2, 0, 0);
+          tmp.scale.setScalar(pulse);
+          tmp.updateMatrix();
+          meshes.taxiHalo.setMatrixAt(halos++, tmp.matrix);
+        }
       } else if (group === 'car') {
         for (const part of ['carBody', 'carCabin', 'carWheels', 'carTails'] as const) meshes[part]?.setMatrixAt(k, tmp.matrix);
         const hash = hashId(p.id);
@@ -141,6 +163,12 @@ export function Vehicles() {
     apply('taxi', ['taxiBody', 'taxiCabin', 'taxiWheels', 'taxiTails', 'taxiSign'] as const);
     apply('car', ['carBody', 'carCabin', 'carWheels', 'carTails'] as const);
     apply('bus', ['busBody', 'busGlass', 'busRoof', 'busWheels', 'busTails'] as const);
+    const halo = meshes.taxiHalo;
+    if (halo) {
+      halo.count = halos;
+      halo.boundingSphere = WORLD_SPHERE;
+      halo.instanceMatrix.needsUpdate = true;
+    }
   });
 
   const pick = (group: Group) => (e: ThreeEvent<MouseEvent>) => {
@@ -161,19 +189,28 @@ export function Vehicles() {
   };
   const handlers = (group: Group) => ({ onClick: pick(group), onPointerOver: over(group), onPointerOut: out });
 
-  // Instanced meshes need a non-empty colour buffer before the first render.
-  const withColors = (count: number, color: string) => {
-    const arr = new Float32Array(count * 3);
-    const col = new THREE.Color(color);
-    for (let i = 0; i < count; i++) arr.set([col.r, col.g, col.b], i * 3);
-    return new THREE.InstancedBufferAttribute(arr, 3);
-  };
+  // Created once: the component re-renders when the fleet list refreshes.
+  const c = useMemo(
+    () => ({
+      taxiBody: withColors(MAX.taxi, palette.taxi),
+      taxiTails: withColors(MAX.taxi, '#7A2530'),
+      taxiSign: withColors(MAX.taxi, '#4A4F5A'),
+      carBody: withColors(MAX.car, '#FFFFFF'),
+      carTails: withColors(MAX.car, '#7A2530'),
+      busTails: withColors(MAX.bus, '#7A2530'),
+    }),
+    [],
+  );
 
   return (
     <group>
       {/* Taxis: the hero objects — saturated Kolo yellow. */}
-      <instancedMesh ref={bind('taxiBody')} args={[g.carBody, undefined, MAX.taxi]} castShadow frustumCulled={false} {...handlers('taxi')}>
-        <meshStandardMaterial color={palette.taxi} roughness={0.35} metalness={0.05} />
+      <instancedMesh ref={bind('taxiBody')} args={[g.carBody, undefined, MAX.taxi]} castShadow frustumCulled={false} instanceColor={c.taxiBody} {...handlers('taxi')}>
+        <meshStandardMaterial roughness={0.35} metalness={0.05} />
+      </instancedMesh>
+      {/* Partner halo under the filtered park's taxis. */}
+      <instancedMesh ref={bind('taxiHalo')} args={[g.halo, undefined, MAX.taxi]} frustumCulled={false} renderOrder={2}>
+        <meshBasicMaterial color={palette.depot} transparent opacity={0.75} depthWrite={false} />
       </instancedMesh>
       <instancedMesh ref={bind('taxiCabin')} args={[g.carCabin, undefined, MAX.taxi]} frustumCulled={false} {...handlers('taxi')}>
         <meshStandardMaterial color={palette.glass} roughness={0.2} metalness={0.3} />
@@ -181,15 +218,15 @@ export function Vehicles() {
       <instancedMesh ref={bind('taxiWheels')} args={[g.carWheels, undefined, MAX.taxi]} frustumCulled={false}>
         <meshStandardMaterial color="#20232A" roughness={0.8} />
       </instancedMesh>
-      <instancedMesh ref={bind('taxiTails')} args={[g.tails, undefined, MAX.taxi]} frustumCulled={false} instanceColor={withColors(MAX.taxi, '#7A2530')}>
+      <instancedMesh ref={bind('taxiTails')} args={[g.tails, undefined, MAX.taxi]} frustumCulled={false} instanceColor={c.taxiTails}>
         <meshBasicMaterial toneMapped={false} />
       </instancedMesh>
-      <instancedMesh ref={bind('taxiSign')} args={[g.sign, undefined, MAX.taxi]} frustumCulled={false} instanceColor={withColors(MAX.taxi, '#4A4F5A')}>
+      <instancedMesh ref={bind('taxiSign')} args={[g.sign, undefined, MAX.taxi]} frustumCulled={false} instanceColor={c.taxiSign}>
         <meshBasicMaterial toneMapped={false} />
       </instancedMesh>
 
       {/* Background cars: neutral greys and whites. */}
-      <instancedMesh ref={bind('carBody')} args={[g.carBody, undefined, MAX.car]} castShadow frustumCulled={false} instanceColor={withColors(MAX.car, '#FFFFFF')} {...handlers('car')}>
+      <instancedMesh ref={bind('carBody')} args={[g.carBody, undefined, MAX.car]} castShadow frustumCulled={false} instanceColor={c.carBody} {...handlers('car')}>
         <meshStandardMaterial roughness={0.45} />
       </instancedMesh>
       <instancedMesh ref={bind('carCabin')} args={[g.carCabin, undefined, MAX.car]} frustumCulled={false}>
@@ -198,7 +235,7 @@ export function Vehicles() {
       <instancedMesh ref={bind('carWheels')} args={[g.carWheels, undefined, MAX.car]} frustumCulled={false}>
         <meshStandardMaterial color="#20232A" roughness={0.8} />
       </instancedMesh>
-      <instancedMesh ref={bind('carTails')} args={[g.tails, undefined, MAX.car]} frustumCulled={false} instanceColor={withColors(MAX.car, '#7A2530')}>
+      <instancedMesh ref={bind('carTails')} args={[g.tails, undefined, MAX.car]} frustumCulled={false} instanceColor={c.carTails}>
         <meshBasicMaterial toneMapped={false} />
       </instancedMesh>
 
@@ -215,11 +252,19 @@ export function Vehicles() {
       <instancedMesh ref={bind('busWheels')} args={[g.busWheels, undefined, MAX.bus]} frustumCulled={false}>
         <meshStandardMaterial color="#20232A" roughness={0.8} />
       </instancedMesh>
-      <instancedMesh ref={bind('busTails')} args={[g.busTails, undefined, MAX.bus]} frustumCulled={false} instanceColor={withColors(MAX.bus, '#7A2530')}>
+      <instancedMesh ref={bind('busTails')} args={[g.busTails, undefined, MAX.bus]} frustumCulled={false} instanceColor={c.busTails}>
         <meshBasicMaterial toneMapped={false} />
       </instancedMesh>
     </group>
   );
+}
+
+/** Instanced meshes need a non-empty colour buffer before the first render. */
+function withColors(count: number, color: string) {
+  const arr = new Float32Array(count * 3);
+  const col = new THREE.Color(color);
+  for (let i = 0; i < count; i++) arr.set([col.r, col.g, col.b], i * 3);
+  return new THREE.InstancedBufferAttribute(arr, 3);
 }
 
 /** Cars parked on local sidewalks: static, muted, not interactive. */
