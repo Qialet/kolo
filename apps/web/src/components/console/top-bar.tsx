@@ -181,15 +181,16 @@ function SimControls() {
 }
 
 function LeverSlider({ label, value, max, format, onCommit }: { label: string; value: number; max: number; format: (v: number) => string; onCommit: (v: number) => void }) {
-  const [local, setLocal] = useState(value);
-  useEffect(() => setLocal(value), [value]);
+  // While dragging show the local value; otherwise the server value.
+  const [drag, setDrag] = useState<number | null>(null);
+  const local = drag ?? value;
   return (
     <div className="flex flex-col gap-2">
       <div className="flex justify-between text-[13px]">
         <span className="font-medium">{label}</span>
         <span className="tabular text-muted-foreground">{format(local)}</span>
       </div>
-      <Slider value={local} min={0} max={max} step={0.05} onValueChange={(v) => setLocal(Array.isArray(v) ? v[0]! : (v as number))} onValueCommitted={(v) => onCommit(Array.isArray(v) ? v[0]! : (v as number))} />
+      <Slider value={local} min={0} max={max} step={0.05} onValueChange={(v) => setDrag(Array.isArray(v) ? v[0]! : (v as number))} onValueCommitted={(v) => { onCommit(Array.isArray(v) ? v[0]! : (v as number)); setDrag(null); }} />
     </div>
   );
 }
@@ -198,9 +199,13 @@ function LiveClock() {
   const connected = useLive((s) => s.connected);
   const [now, setNow] = useState<Date | null>(null);
   useEffect(() => {
-    setNow(new Date());
-    const id = setInterval(() => setNow(new Date()), 1000);
-    return () => clearInterval(id);
+    const tick = () => setNow(new Date());
+    const first = setTimeout(tick, 0);
+    const id = setInterval(tick, 1000);
+    return () => {
+      clearTimeout(first);
+      clearInterval(id);
+    };
   }, []);
   return (
     <div className={cn('flex h-9 items-center gap-2 rounded-xl px-3 text-[13px] font-semibold', connected ? 'bg-pickup/12 text-pickup' : 'bg-destructive/10 text-destructive')}>

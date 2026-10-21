@@ -600,74 +600,55 @@ function fillMarket(b: Builder, ctx: BlockCtx, spec: Extract<SpecialBlock, { kin
 function fillDepot(b: Builder, ctx: BlockCtx, spec: Extract<SpecialBlock, { kind: 'depot' }>) {
   const { inner } = ctx.block;
   const { city } = b;
-  // Gate faces the side with the longest frontage that has a street (prefer E/W for tall blocks).
+  // The gate faces the longer street frontage; the yard is a compact band around it.
   const tall = inner.z1 - inner.z0 > inner.x1 - inner.x0;
   const gateSide: Side = tall ? (ctx.sides.E ? 'E' : 'W') : ctx.sides.S ? 'S' : 'N';
   const street = ctx.sides[gateSide]!;
-  // Garage with service boxes on the side opposite the gate.
-  const garageDepth = 16;
-  let garage: Rect;
-  if (gateSide === 'E') garage = { x0: inner.x0, x1: inner.x0 + garageDepth, z0: inner.z0 + 6, z1: inner.z0 + 6 + spec.boxes * 9 };
-  else if (gateSide === 'W') garage = { x0: inner.x1 - garageDepth, x1: inner.x1, z0: inner.z0 + 6, z1: inner.z0 + 6 + spec.boxes * 9 };
-  else if (gateSide === 'S') garage = { x0: inner.x0 + 6, x1: inner.x0 + 6 + spec.boxes * 9, z0: inner.z0, z1: inner.z0 + garageDepth };
-  else garage = { x0: inner.x0 + 6, x1: inner.x0 + 6 + spec.boxes * 9, z0: inner.z1 - garageDepth, z1: inner.z1 };
-  addBuilding(b, ctx, garage, 'garage', 7, { name: `${spec.name} servis` });
-
   const cx = (inner.x0 + inner.x1) / 2;
   const cz = (inner.z0 + inner.z1) / 2;
-  const gate =
-    gateSide === 'E' ? v(inner.x1, cz) : gateSide === 'W' ? v(inner.x0, cz) : gateSide === 'S' ? v(cx, inner.z1) : v(cx, inner.z0);
   const inward = gateSide === 'E' ? v(-1, 0) : gateSide === 'W' ? v(1, 0) : gateSide === 'S' ? v(0, -1) : v(0, 1);
-  const yard = add(gate, scale(inward, 8));
-  const office = addBuilding(
-    b,
-    ctx,
-    gateSide === 'E' || gateSide === 'W'
-      ? { x0: gate.x - (gateSide === 'E' ? 12 : 0), x1: gate.x + (gateSide === 'W' ? 12 : 0), z0: cz + 9, z1: cz + 19 }
-      : { x0: cx + 9, x1: cx + 19, z0: gate.z - (gateSide === 'S' ? 12 : 0), z1: gate.z + (gateSide === 'N' ? 12 : 0) },
-    'depot-office',
-    6,
-    { name: spec.name },
-  );
+  const along = tall ? v(0, 1) : v(1, 0);
+  const gate = gateSide === 'E' ? v(inner.x1, cz) : gateSide === 'W' ? v(inner.x0, cz) : gateSide === 'S' ? v(cx, inner.z1) : v(cx, inner.z0);
+  const depth = tall ? inner.x1 - inner.x0 : inner.z1 - inner.z0;
+  const span = tall ? inner.z1 - inner.z0 : inner.x1 - inner.x0;
+  const halfSpan = Math.min(span / 2, 46);
+  /** Local frame: u along the gate street, w from the gate into the yard. */
+  const P = (u: number, w: number) => add(add(gate, scale(along, u)), scale(inward, w));
+  const rectOf = (a: Vec2, c: Vec2): Rect => ({ x0: Math.min(a.x, c.x), x1: Math.max(a.x, c.x), z0: Math.min(a.z, c.z), z1: Math.max(a.z, c.z) });
 
-  // Service boxes: doors face the lot.
+  const lot = rectOf(P(-halfSpan, 0), P(halfSpan, depth));
+  const gw = spec.boxes * 9;
+  const garage = rectOf(P(-gw / 2, depth - 16), P(gw / 2, depth));
+  addBuilding(b, ctx, garage, 'garage', 7, { name: `${spec.name} servis` });
+  const office = addBuilding(b, ctx, rectOf(P(halfSpan - 15, 0.5), P(halfSpan - 2, 12)), 'depot-office', 6, { name: spec.name });
+  const yard = P(0, 8);
+
+  // Service boxes: cars drive in nose-first, away from the gate.
   const boxes: Slot[] = [];
   for (let i = 0; i < spec.boxes; i++) {
-    if (gateSide === 'E') boxes.push({ x: garage.x0 + 8, z: garage.z0 + 4.5 + i * 9, heading: headingOf(v(-1, 0)) });
-    else if (gateSide === 'W') boxes.push({ x: garage.x1 - 8, z: garage.z0 + 4.5 + i * 9, heading: headingOf(v(1, 0)) });
-    else if (gateSide === 'S') boxes.push({ x: garage.x0 + 4.5 + i * 9, z: garage.z0 + 8, heading: headingOf(v(0, -1)) });
-    else boxes.push({ x: garage.x0 + 4.5 + i * 9, z: garage.z1 - 8, heading: headingOf(v(0, 1)) });
+    const p = P(-gw / 2 + 4.5 + i * 9, depth - 8);
+    boxes.push({ x: p.x, z: p.z, heading: headingOf(inward) });
   }
 
-  // Parking slots in rows, cars nose-in towards the row aisle.
+  // Pairs of slot rows facing a shared aisle, filled until capacity.
   const slots: Slot[] = [];
-  const lot: Rect = { ...inner };
-  const free = (p: Vec2) =>
-    !(p.x > garage.x0 - 10 && p.x < garage.x1 + 10 && p.z > garage.z0 - 10 && p.z < garage.z1 + 10) &&
-    !(p.x > office.x - office.w / 2 - 4 && p.x < office.x + office.w / 2 + 4 && p.z > office.z - office.d / 2 - 4 && p.z < office.z + office.d / 2 + 4) &&
-    dist(p, yard) > 10;
-  if (tall) {
-    const rowsX = [cx - 14, cx + 14];
-    for (let z = inner.z0 + 8; z < inner.z1 - 6 && slots.length < spec.capacity; z += 3.4) {
-      for (const x of rowsX) {
-        const p = v(x, z);
-        if (slots.length < spec.capacity && free(p)) slots.push({ x, z, heading: headingOf(v(x < cx ? 1 : -1, 0)) });
-      }
-    }
-  } else {
-    const rowsZ = [cz - 12, cz + 12];
-    for (let x = inner.x0 + 8; x < inner.x1 - 6 && slots.length < spec.capacity; x += 3.4) {
-      for (const z of rowsZ) {
-        const p = v(x, z);
-        if (slots.length < spec.capacity && free(p)) slots.push({ x, z, heading: headingOf(v(0, z < cz ? 1 : -1)) });
+  for (let w = 20; w + 14 < depth - 22 && slots.length < spec.capacity; w += 30) {
+    for (const [rowW, facing] of [
+      [w, inward],
+      [w + 14, scale(inward, -1)],
+    ] as const) {
+      for (let u = -halfSpan + 6; u <= halfSpan - 6 && slots.length < spec.capacity; u += 3.4) {
+        const p = P(u, rowW);
+        slots.push({ x: p.x, z: p.z, heading: headingOf(facing) });
       }
     }
   }
+
   const entrance = add(gate, scale(inward, -SIDEWALK / 2));
   const addr = addAddress(b, gateSide, street, entrance, office.id, null);
   office.addressId = addr.id;
   const curb = curbFor(b, gateSide, street, street.axis === 'EW' ? gate.x : gate.z);
-  const depot: Depot = {
+  city.depots.push({
     id: spec.depotId,
     name: spec.name,
     blockId: ctx.block.id,
@@ -679,8 +660,25 @@ function fillDepot(b: Builder, ctx: BlockCtx, spec: Extract<SpecialBlock, { kind
     addressId: addr.id,
     slots,
     boxes,
-  };
-  city.depots.push(depot);
+  });
+
+  // The rest of the block is ordinary housing on both sides of the yard.
+  const parts: { inner: Rect; sides: BlockCtx['sides'] }[] = tall
+    ? [
+        { inner: { ...inner, z1: lot.z0 - 3 }, sides: { N: ctx.sides.N, W: ctx.sides.W, E: ctx.sides.E } },
+        { inner: { ...inner, z0: lot.z1 + 3 }, sides: { S: ctx.sides.S, W: ctx.sides.W, E: ctx.sides.E } },
+      ]
+    : [
+        { inner: { ...inner, x1: lot.x0 - 3 }, sides: { W: ctx.sides.W, N: ctx.sides.N, S: ctx.sides.S } },
+        { inner: { ...inner, x0: lot.x1 + 3 }, sides: { E: ctx.sides.E, N: ctx.sides.N, S: ctx.sides.S } },
+      ];
+  for (const part of parts) {
+    const w = part.inner.x1 - part.inner.x0;
+    const d = part.inner.z1 - part.inner.z0;
+    if (w < 30 || d < 30) continue;
+    const sides = Object.fromEntries(Object.entries(part.sides).filter(([, s]) => s)) as BlockCtx['sides'];
+    fillPerimeter(b, { block: { ...ctx.block, inner: part.inner }, range: ctx.range, sides });
+  }
 }
 
 // ───────────────────────────── transit & greenery ─────────────────────────────

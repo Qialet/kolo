@@ -176,7 +176,7 @@ function Depots({ city }: { city: City }) {
             {depot.boxes.map((box, i) => {
               const back = { x: Math.sin(box.heading), z: Math.cos(box.heading) };
               return (
-                <mesh key={i} position={[box.x - back.x * 4.2, 1.9, box.z - back.z * 4.2]} rotation-y={box.heading}>
+                <mesh key={i} position={[box.x - back.x * 8.1, 1.9, box.z - back.z * 8.1]} rotation-y={box.heading}>
                   <boxGeometry args={[3.6, 3.4, 0.5]} />
                   <meshStandardMaterial color={palette.service} roughness={0.6} />
                 </mesh>

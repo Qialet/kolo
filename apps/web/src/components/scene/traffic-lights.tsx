@@ -157,12 +157,18 @@ export function TrafficLights({ city }: { city: City }) {
         <boxGeometry args={[0.62, 2.0, 0.5]} />
         <meshStandardMaterial color="#2B303A" roughness={0.5} />
       </instancedMesh>
-      {[red, amber, green].map((ref, k) => (
-        <instancedMesh key={k} ref={ref} args={[undefined, undefined, n]} onClick={onClick}>
-          <sphereGeometry args={[0.26, 12, 8]} />
-          <meshBasicMaterial toneMapped={false} />
-        </instancedMesh>
-      ))}
+      <instancedMesh ref={red} args={[undefined, undefined, n]} onClick={onClick}>
+        <sphereGeometry args={[0.26, 12, 8]} />
+        <meshBasicMaterial toneMapped={false} />
+      </instancedMesh>
+      <instancedMesh ref={amber} args={[undefined, undefined, n]} onClick={onClick}>
+        <sphereGeometry args={[0.26, 12, 8]} />
+        <meshBasicMaterial toneMapped={false} />
+      </instancedMesh>
+      <instancedMesh ref={green} args={[undefined, undefined, n]} onClick={onClick}>
+        <sphereGeometry args={[0.26, 12, 8]} />
+        <meshBasicMaterial toneMapped={false} />
+      </instancedMesh>
       <instancedMesh ref={bars} args={[undefined, undefined, n]}>
         <boxGeometry args={[1, 0.02, 1]} />
         <meshBasicMaterial toneMapped={false} transparent opacity={0.85} />

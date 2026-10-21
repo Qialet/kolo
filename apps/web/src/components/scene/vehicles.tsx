@@ -19,7 +19,6 @@ const KIND = { TAXI: 0, CAR: 1, BUS: 2 } as const;
 const tmp = new THREE.Object3D();
 /** Moving instances: raycasting must not rely on a bounding sphere cached at first use. */
 const WORLD_SPHERE = new THREE.Sphere(new THREE.Vector3(0, 0, 0), 2000);
-const c = new THREE.Color();
 const TAIL_ON = new THREE.Color('#FF2D3D');
 const TAIL_OFF = new THREE.Color('#7A2530');
 const SIGN_FREE = new THREE.Color(palette.green);
@@ -65,27 +64,28 @@ function useGeometries() {
 }
 
 type Group = 'taxi' | 'car' | 'bus';
+type Part =
+  | 'taxiBody' | 'taxiCabin' | 'taxiWheels' | 'taxiTails' | 'taxiSign'
+  | 'carBody' | 'carCabin' | 'carWheels' | 'carTails'
+  | 'busBody' | 'busGlass' | 'busRoof' | 'busWheels' | 'busTails';
+
+/** The single <Vehicles> instance registers its instanced meshes here; only useFrame reads them. */
+const meshes: Partial<Record<Part, THREE.InstancedMesh>> = {};
+const bind = (part: Part) => (m: THREE.InstancedMesh | null) => register(part, m);
+function register(part: Part, m: THREE.InstancedMesh | null) {
+  if (m) meshes[part] = m;
+  else delete meshes[part];
+}
+
+const setCursor = (value: string) => {
+  document.body.style.cursor = value;
+};
 
 export function Vehicles() {
   const g = useGeometries();
   const poses = useRef<VehiclePose[]>([]);
   const ids = useRef<Record<Group, string[]>>({ taxi: [], car: [], bus: [] });
-  const refs = {
-    taxiBody: useRef<THREE.InstancedMesh>(null),
-    taxiCabin: useRef<THREE.InstancedMesh>(null),
-    taxiWheels: useRef<THREE.InstancedMesh>(null),
-    taxiTails: useRef<THREE.InstancedMesh>(null),
-    taxiSign: useRef<THREE.InstancedMesh>(null),
-    carBody: useRef<THREE.InstancedMesh>(null),
-    carCabin: useRef<THREE.InstancedMesh>(null),
-    carWheels: useRef<THREE.InstancedMesh>(null),
-    carTails: useRef<THREE.InstancedMesh>(null),
-    busBody: useRef<THREE.InstancedMesh>(null),
-    busGlass: useRef<THREE.InstancedMesh>(null),
-    busRoof: useRef<THREE.InstancedMesh>(null),
-    busWheels: useRef<THREE.InstancedMesh>(null),
-    busTails: useRef<THREE.InstancedMesh>(null),
-  };
+
   const select = useUi((s) => s.select);
   const hover = useUi((s) => s.hover);
   const carColors = useMemo(() => palette.cars.map((x) => new THREE.Color(x)), []);
@@ -111,23 +111,23 @@ export function Vehicles() {
       tmp.updateMatrix();
       const braking = (p.flags & 1) !== 0;
       if (group === 'taxi') {
-        for (const r of [refs.taxiBody, refs.taxiCabin, refs.taxiWheels, refs.taxiTails, refs.taxiSign]) r.current?.setMatrixAt(k, tmp.matrix);
-        refs.taxiTails.current?.setColorAt(k, braking ? TAIL_ON : TAIL_OFF);
+        for (const part of ['taxiBody', 'taxiCabin', 'taxiWheels', 'taxiTails', 'taxiSign'] as const) meshes[part]?.setMatrixAt(k, tmp.matrix);
+        meshes.taxiTails?.setColorAt(k, braking ? TAIL_ON : TAIL_OFF);
         const sign = p.activity === FREE ? SIGN_FREE : p.activity === TO_PICKUP || p.activity === AT_PICKUP ? SIGN_PICKUP : SIGN_OFF;
-        refs.taxiSign.current?.setColorAt(k, sign);
+        meshes.taxiSign?.setColorAt(k, sign);
       } else if (group === 'car') {
-        for (const r of [refs.carBody, refs.carCabin, refs.carWheels, refs.carTails]) r.current?.setMatrixAt(k, tmp.matrix);
+        for (const part of ['carBody', 'carCabin', 'carWheels', 'carTails'] as const) meshes[part]?.setMatrixAt(k, tmp.matrix);
         const hash = hashId(p.id);
-        refs.carBody.current?.setColorAt(k, carColors[hash % carColors.length]!);
-        refs.carTails.current?.setColorAt(k, braking ? TAIL_ON : TAIL_OFF);
+        meshes.carBody?.setColorAt(k, carColors[hash % carColors.length]!);
+        meshes.carTails?.setColorAt(k, braking ? TAIL_ON : TAIL_OFF);
       } else {
-        for (const r of [refs.busBody, refs.busGlass, refs.busRoof, refs.busWheels, refs.busTails]) r.current?.setMatrixAt(k, tmp.matrix);
-        refs.busTails.current?.setColorAt(k, braking ? TAIL_ON : TAIL_OFF);
+        for (const part of ['busBody', 'busGlass', 'busRoof', 'busWheels', 'busTails'] as const) meshes[part]?.setMatrixAt(k, tmp.matrix);
+        meshes.busTails?.setColorAt(k, braking ? TAIL_ON : TAIL_OFF);
       }
     }
-    const apply = (group: Group, list: React.RefObject<THREE.InstancedMesh | null>[]) => {
-      for (const r of list) {
-        const m = r.current;
+    const apply = (group: Group, list: readonly Part[]) => {
+      for (const part of list) {
+        const m = meshes[part];
         if (!m) continue;
         m.count = counts[group];
         m.boundingSphere = WORLD_SPHERE;
@@ -135,9 +135,9 @@ export function Vehicles() {
         if (m.instanceColor) m.instanceColor.needsUpdate = true;
       }
     };
-    apply('taxi', [refs.taxiBody, refs.taxiCabin, refs.taxiWheels, refs.taxiTails, refs.taxiSign]);
-    apply('car', [refs.carBody, refs.carCabin, refs.carWheels, refs.carTails]);
-    apply('bus', [refs.busBody, refs.busGlass, refs.busRoof, refs.busWheels, refs.busTails]);
+    apply('taxi', ['taxiBody', 'taxiCabin', 'taxiWheels', 'taxiTails', 'taxiSign'] as const);
+    apply('car', ['carBody', 'carCabin', 'carWheels', 'carTails'] as const);
+    apply('bus', ['busBody', 'busGlass', 'busRoof', 'busWheels', 'busTails'] as const);
   });
 
   const pick = (group: Group) => (e: ThreeEvent<MouseEvent>) => {
@@ -150,11 +150,11 @@ export function Vehicles() {
     e.stopPropagation();
     const id = e.instanceId !== undefined ? ids.current[group][e.instanceId] : undefined;
     hover(id ? `${group}:${id}` : null);
-    document.body.style.cursor = 'pointer';
+    setCursor('pointer');
   };
   const out = () => {
     hover(null);
-    document.body.style.cursor = '';
+    setCursor('');
   };
   const handlers = (group: Group) => ({ onClick: pick(group), onPointerOver: over(group), onPointerOut: out });
 
@@ -169,50 +169,50 @@ export function Vehicles() {
   return (
     <group>
       {/* Taxis: the hero objects — saturated Kolo yellow. */}
-      <instancedMesh ref={refs.taxiBody} args={[g.carBody, undefined, MAX.taxi]} castShadow frustumCulled={false} {...handlers('taxi')}>
+      <instancedMesh ref={bind('taxiBody')} args={[g.carBody, undefined, MAX.taxi]} castShadow frustumCulled={false} {...handlers('taxi')}>
         <meshStandardMaterial color={palette.taxi} roughness={0.35} metalness={0.05} />
       </instancedMesh>
-      <instancedMesh ref={refs.taxiCabin} args={[g.carCabin, undefined, MAX.taxi]} frustumCulled={false} {...handlers('taxi')}>
+      <instancedMesh ref={bind('taxiCabin')} args={[g.carCabin, undefined, MAX.taxi]} frustumCulled={false} {...handlers('taxi')}>
         <meshStandardMaterial color={palette.glass} roughness={0.2} metalness={0.3} />
       </instancedMesh>
-      <instancedMesh ref={refs.taxiWheels} args={[g.carWheels, undefined, MAX.taxi]} frustumCulled={false}>
+      <instancedMesh ref={bind('taxiWheels')} args={[g.carWheels, undefined, MAX.taxi]} frustumCulled={false}>
         <meshStandardMaterial color="#20232A" roughness={0.8} />
       </instancedMesh>
-      <instancedMesh ref={refs.taxiTails} args={[g.tails, undefined, MAX.taxi]} frustumCulled={false} instanceColor={withColors(MAX.taxi, '#7A2530')}>
+      <instancedMesh ref={bind('taxiTails')} args={[g.tails, undefined, MAX.taxi]} frustumCulled={false} instanceColor={withColors(MAX.taxi, '#7A2530')}>
         <meshBasicMaterial toneMapped={false} />
       </instancedMesh>
-      <instancedMesh ref={refs.taxiSign} args={[g.sign, undefined, MAX.taxi]} frustumCulled={false} instanceColor={withColors(MAX.taxi, '#4A4F5A')}>
+      <instancedMesh ref={bind('taxiSign')} args={[g.sign, undefined, MAX.taxi]} frustumCulled={false} instanceColor={withColors(MAX.taxi, '#4A4F5A')}>
         <meshBasicMaterial toneMapped={false} />
       </instancedMesh>
 
       {/* Background cars: neutral greys and whites. */}
-      <instancedMesh ref={refs.carBody} args={[g.carBody, undefined, MAX.car]} castShadow frustumCulled={false} instanceColor={withColors(MAX.car, '#FFFFFF')} {...handlers('car')}>
+      <instancedMesh ref={bind('carBody')} args={[g.carBody, undefined, MAX.car]} castShadow frustumCulled={false} instanceColor={withColors(MAX.car, '#FFFFFF')} {...handlers('car')}>
         <meshStandardMaterial roughness={0.45} />
       </instancedMesh>
-      <instancedMesh ref={refs.carCabin} args={[g.carCabin, undefined, MAX.car]} frustumCulled={false}>
+      <instancedMesh ref={bind('carCabin')} args={[g.carCabin, undefined, MAX.car]} frustumCulled={false}>
         <meshStandardMaterial color={palette.glass} roughness={0.25} metalness={0.25} />
       </instancedMesh>
-      <instancedMesh ref={refs.carWheels} args={[g.carWheels, undefined, MAX.car]} frustumCulled={false}>
+      <instancedMesh ref={bind('carWheels')} args={[g.carWheels, undefined, MAX.car]} frustumCulled={false}>
         <meshStandardMaterial color="#20232A" roughness={0.8} />
       </instancedMesh>
-      <instancedMesh ref={refs.carTails} args={[g.tails, undefined, MAX.car]} frustumCulled={false} instanceColor={withColors(MAX.car, '#7A2530')}>
+      <instancedMesh ref={bind('carTails')} args={[g.tails, undefined, MAX.car]} frustumCulled={false} instanceColor={withColors(MAX.car, '#7A2530')}>
         <meshBasicMaterial toneMapped={false} />
       </instancedMesh>
 
       {/* Buses: cobalt, the second accent of the city. */}
-      <instancedMesh ref={refs.busBody} args={[g.busBody, undefined, MAX.bus]} castShadow frustumCulled={false} {...handlers('bus')}>
+      <instancedMesh ref={bind('busBody')} args={[g.busBody, undefined, MAX.bus]} castShadow frustumCulled={false} {...handlers('bus')}>
         <meshStandardMaterial color={palette.bus} roughness={0.4} />
       </instancedMesh>
-      <instancedMesh ref={refs.busGlass} args={[g.busGlass, undefined, MAX.bus]} frustumCulled={false} {...handlers('bus')}>
+      <instancedMesh ref={bind('busGlass')} args={[g.busGlass, undefined, MAX.bus]} frustumCulled={false} {...handlers('bus')}>
         <meshStandardMaterial color="#1B2A4A" roughness={0.2} metalness={0.3} />
       </instancedMesh>
-      <instancedMesh ref={refs.busRoof} args={[g.busRoof, undefined, MAX.bus]} frustumCulled={false}>
+      <instancedMesh ref={bind('busRoof')} args={[g.busRoof, undefined, MAX.bus]} frustumCulled={false}>
         <meshStandardMaterial color="#F4F7FF" roughness={0.6} />
       </instancedMesh>
-      <instancedMesh ref={refs.busWheels} args={[g.busWheels, undefined, MAX.bus]} frustumCulled={false}>
+      <instancedMesh ref={bind('busWheels')} args={[g.busWheels, undefined, MAX.bus]} frustumCulled={false}>
         <meshStandardMaterial color="#20232A" roughness={0.8} />
       </instancedMesh>
-      <instancedMesh ref={refs.busTails} args={[g.busTails, undefined, MAX.bus]} frustumCulled={false} instanceColor={withColors(MAX.bus, '#7A2530')}>
+      <instancedMesh ref={bind('busTails')} args={[g.busTails, undefined, MAX.bus]} frustumCulled={false} instanceColor={withColors(MAX.bus, '#7A2530')}>
         <meshBasicMaterial toneMapped={false} />
       </instancedMesh>
     </group>

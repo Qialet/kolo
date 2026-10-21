@@ -58,9 +58,10 @@ export function buildGroundGeometry(city: City) {
       z1: Math.min(edge.z1, block.inner.z1 + pad),
     };
     parts.push(rectSlab(r, 0.16, palette.sidewalk));
-    const top = block.kind === 'park' ? palette.park : block.kind === 'depot' ? palette.depotLot : palette.block;
-    parts.push(rectSlab(block.inner, block.kind === 'depot' ? 0.17 : 0.2, top));
+    parts.push(rectSlab(block.inner, 0.2, block.kind === 'park' ? palette.park : palette.block));
   }
+  // Partner yards: asphalt with a violet tint, slightly above the courtyard level.
+  for (const depot of city.depots) parts.push(rectSlab(depot.lot, 0.205, palette.depotLot));
   for (const street of city.streets) {
     if (!street.median) continue;
     for (const seg of city.segments) {

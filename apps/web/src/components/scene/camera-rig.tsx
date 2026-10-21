@@ -21,7 +21,7 @@ interface Anim {
 /** Isometric map-style camera: pan in the ground plane, limited tilt, animated focus and follow. */
 export function CameraRig() {
   const controls = useRef<MapControlsImpl>(null);
-  const camera = useThree((s) => s.camera) as THREE.OrthographicCamera;
+  const get = useThree((s) => s.get);
   const anim = useRef<Anim | null>(null);
   const follow = useRef<string | null>(null);
   const request = useUi((s) => s.camera);
@@ -29,12 +29,14 @@ export function CameraRig() {
 
   useEffect(() => {
     if (!request) return;
+    const camera = get().camera;
     anim.current = { target: new THREE.Vector3(request.x, 0, request.z), zoom: request.zoom ?? Math.max(camera.zoom, 4), rotate: 0 };
     follow.current = request.follow ?? null;
-  }, [request, camera]);
+  }, [request, get]);
 
   useEffect(() => {
     if (!command) return;
+    const camera = get().camera;
     const c = controls.current;
     const target = c ? c.target.clone() : new THREE.Vector3();
     const current = anim.current ?? { target, zoom: camera.zoom, rotate: 0 };
@@ -50,9 +52,10 @@ export function CameraRig() {
       }
       anim.current = { target: new THREE.Vector3(), zoom: HOME_ZOOM, rotate: 0 };
     }
-  }, [command, camera]);
+  }, [command, get]);
 
-  useFrame((_, dt) => {
+  useFrame((state, dt) => {
+    const camera = state.camera;
     const c = controls.current;
     const a = anim.current;
     if (!c) return;
