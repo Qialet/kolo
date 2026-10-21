@@ -11,10 +11,15 @@ const tsc = createRequire(import.meta.url).resolve('typescript/bin/tsc');
 const tsconfig = resolve(root, 'tsconfig.build.json');
 const entry = resolve(root, 'dist/main.js');
 const DEBOUNCE_MS = 400;
+const OUTPUT = /^dist[\\/].*\.(js|json)$/;
 
-// Workspace packages are linked into node_modules; watch their real dist folders.
-const watched = [resolve(root, 'dist')];
-for (const pkg of ['@kolo/sim', '@kolo/contracts']) watched.push(dirname(fileURLToPath(import.meta.resolve(pkg))));
+// Watch package roots and filter by dist/: a build that deletes and recreates dist would
+// otherwise leave the watcher on a directory that no longer exists.
+const watched = [{ dir: root, label: '' }];
+for (const pkg of ['@kolo/sim', '@kolo/contracts']) {
+  const dist = dirname(fileURLToPath(import.meta.resolve(pkg)));
+  watched.push({ dir: dirname(dist), label: `${pkg.split('/')[1]}/` });
+}
 
 let server = null;
 let restarting = false;
@@ -23,6 +28,10 @@ let shuttingDown = false;
 let ready = false;
 
 function start() {
+  if (!existsSync(entry)) {
+    console.log('[dev] waiting for build output');
+    return;
+  }
   server = spawn(process.execPath, ['--enable-source-maps', entry], { cwd: root, stdio: 'inherit' });
   server.on('exit', () => {
     server = null;
@@ -51,16 +60,14 @@ compiler.stdout.on('data', (chunk) => {
   process.stdout.write(chunk);
   if (!ready && /Watching for file changes/.test(String(chunk))) {
     ready = true;
-    if (existsSync(entry)) start();
+    start();
   }
 });
 
 let timer = null;
-for (const dir of watched) {
-  if (!existsSync(dir)) continue;
-  const label = dir.includes('packages') ? `${dirname(dir).split(/[\\/]/).pop()}/` : '';
+for (const { dir, label } of watched) {
   watch(dir, { recursive: true }, (_event, file) => {
-    if (!ready || !file || !/\.(js|json)$/.test(file)) return;
+    if (!ready || !file || !OUTPUT.test(file)) return;
     clearTimeout(timer);
     timer = setTimeout(() => restart(`${label}${file}`), DEBOUNCE_MS);
   });
