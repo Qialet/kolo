@@ -36,8 +36,8 @@
 - Включён React Compiler: не обращаться к ref в render, не мутировать значения хуков (камеру брать из state в useFrame). Проверка — pnpm lint.
 
 ## Запуск и порты
-- pnpm dev в корне: turbo собирает пакеты, запускает tsc watch пакетов, nest --watch (порт 4000) и next dev (порт 3000).
-- Nest не перезапускается при изменении packages/sim — после правок движка перезапусти dev.
+- pnpm dev в корне: turbo собирает пакеты, запускает tsc watch пакетов, раннер API (apps/api/scripts/dev.mjs) и next dev (порт 3000).
+- Раннер API: tsc watch плюс перезапуск сервера (порт 4000) с дебаунсом при изменении dist API, packages/sim или packages/contracts.
 - Переменные: apps/api/.env (DATABASE_URL, PORT, WEB_ORIGIN), фронт — NEXT_PUBLIC_API_URL (по умолчанию localhost:4000/api).
 
 ## Тесты
