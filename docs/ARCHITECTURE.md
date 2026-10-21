@@ -7,6 +7,12 @@
 - Клиент (apps/web) строит тот же город локально из того же seed, поэтому по сети ходят только динамические данные.
 - Детали выбранного объекта (маршрут такси, светофор, автобус) клиент опрашивает по REST раз в секунду через TanStack Query.
 
+## Данные реального города
+- Сырьё (выгрузка Overpass, GTFS data.gov.rs) лежит в data/raw вне git; скачивание — только с разрешения пользователя.
+- Импорт: packages/sim/src/import (подпуть @kolo/sim/import, в веб не попадает), CLI packages/sim/scripts/import-district.mjs после сборки sim пишет data/districts/belgrade-center.json.
+- Файл района: meta (опорная точка, рамка, дата снимка OSM, хэш версии FNV-1a) и roads (узлы, рёбра с полосами и тегами, запреты поворотов); типы — packages/sim/src/city/district.ts.
+- buildCityFromDistrict превращает файл в City за около 100 мс; подключение сервера и клиента — план 2.
+
 ## Персистентность
 - PostgreSQL через Prisma 8 (contract-first). Источник схемы — apps/api/src/prisma/contract.prisma.
 - В БД: партнёры, парки, водители, машины, журнал смен статусов, заказы, события заказов, возражения.

@@ -27,6 +27,8 @@ const CLUSTER_EDGE = 18;
 /** Any two nodes this close are merged, whatever they are. */
 const TINY_EDGE = 3;
 const CLUSTER_RADIUS = 30;
+/** Ring pieces shorter than this merge their ends (a car could not stop on them). */
+const RING_TINY = 8;
 /** Length over which a segment's entry / exit direction is measured. */
 const TANGENT_SPAN = 15;
 const CONFLICT_CLEARANCE = 1.6;
@@ -94,7 +96,9 @@ export function buildCityFromDistrict(district: District): City {
   const candidates = [...edges.values()]
     .map((e) => ({ e, len: polyline(e.pts).length }))
     .filter(({ e, len }) => {
-      if (boundary.has(e.a) || boundary.has(e.b) || e.src.roundabout || len >= CLUSTER_EDGE) return false;
+      if (boundary.has(e.a) || boundary.has(e.b) || len >= CLUSTER_EDGE) return false;
+      // A ring keeps its shape unless a piece of it is too short to hold a car (mini-roundabouts).
+      if (e.src.roundabout) return len < RING_TINY;
       return len < TINY_EDGE || (isJunction(e.a) && isJunction(e.b));
     })
     .sort((p, q) => p.len - q.len);
@@ -103,7 +107,7 @@ export function buildCityFromDistrict(district: District): City {
     const cb = clusterOf.get(e.b)!;
     if (ca === cb) continue;
     const members = [...cluster.get(ca)!, ...cluster.get(cb)!];
-    if (members.filter((m) => ringNode.has(m)).length > 1) continue;
+    if (!e.src.roundabout && members.filter((m) => ringNode.has(m)).length > 1) continue;
     const c = centroid(members.map((m) => nodePos.get(m)!));
     if (members.some((m) => dist(nodePos.get(m)!, c) > CLUSTER_RADIUS)) continue;
     cluster.set(ca, members);

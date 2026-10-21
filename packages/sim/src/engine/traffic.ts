@@ -62,6 +62,8 @@ interface OccEntry {
 }
 
 const YARD_SPEED = 3.2;
+/** Seconds stopped at a stop line after which a driver no longer yields (see gateOpen). */
+const IMPATIENCE = 20;
 
 export function makeDriver(rng: Rng, kind: VehicleKind): DriverProfile {
   if (kind === 'BUS') return { v0Factor: rng.range(0.82, 0.9), aMax: 1.1, bComf: 2.2, headway: 1.5, minGap: 2.5 };
@@ -412,6 +414,9 @@ export class TrafficSystem {
     for (const e of this.occ[c.to]!) {
       if (e.pos - e.v.length < v.length + 2 && e.pos > -1 && e.v.speed < 2) return false;
     }
+    // After a long wait at the line a driver stops yielding to traffic that is not actually moving
+    // in (crossing paths are still checked above): breaks mutual-yield deadlocks.
+    if (v.stoppedFor > IMPATIENCE) return true;
     if (flashing) {
       const myRank = city.segments[city.lanes[c.from]!.seg]!.rank;
       if (this.approachingConflict(node.in, c, (seg) => seg.rank > myRank, 32)) return false;
