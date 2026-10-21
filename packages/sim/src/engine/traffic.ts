@@ -3,7 +3,7 @@ import { lanePoint } from '../city/build.js';
 import type { City, Connector, CurbRef, Lane, Segment } from '../city/types.js';
 import { dist, dot, polyline, poseAlong, poseAt, type Polyline, type Pose, type Vec2 } from '../geometry.js';
 import type { Rng } from '../rng.js';
-import { laneIndexesFor, routeSegments, turnBetween } from './routing.js';
+import { chooseLanes, laneIndexesFor, routeSegments, turnBetween } from './routing.js';
 import { isFlashing, signalState, type SignalRuntime, type SignalState } from './signals.js';
 
 export type VehicleMode = 'lane' | 'conn' | 'pulled' | 'yard' | 'parked';
@@ -146,20 +146,13 @@ export class TrafficSystem {
     if (lane.seg === targetSeg && (targetLane === startLane || targetLane < 0) && ('seg' in target || target.s > startS + 6)) {
       segs = [lane.seg];
     } else {
-      segs = routeSegments(city, lane.seg, lane.index, targetSeg, extraCost ? (seg) => extraCost(seg.id) : undefined);
+      segs = routeSegments(city, lane.seg, lane.index, targetSeg, extraCost ? (seg) => extraCost(seg.id) : undefined, v.kind === 'BUS', targetLane);
     }
     if (!segs) return false;
     const idx = laneIndexesFor(city, segs, v.straightPreference, targetLane >= 0 ? 'curb' : 'any');
-    const steps: PathStep[] = [{ lane: startLane, conn: v.mode === 'conn' ? v.conn : -1 }];
-    for (let i = 1; i < segs.length; i++) {
-      const seg = city.segments[segs[i]!]!;
-      const nextLane = i === segs.length - 1 && targetLane >= 0 ? targetLane : seg.lanes[Math.min(idx[i]!, seg.lanes.length - 1)]!;
-      const prevLane = city.lanes[steps[steps.length - 1]!.lane]!;
-      const conn = prevLane.out.map((c) => city.connectors[c]!).find((c) => c.to === nextLane);
-      if (!conn) return false;
-      steps.push({ lane: nextLane, conn: conn.id });
-    }
-    v.path = steps;
+    const rest = chooseLanes(city, segs, startLane, segs.length > 1 ? targetLane : -1, idx);
+    if (!rest) return false;
+    v.path = [{ lane: startLane, conn: v.mode === 'conn' ? v.conn : -1 }, ...rest];
     v.pathIdx = 0;
     v.stop = targetLane >= 0 && 's' in target ? { lane: targetLane, s: target.s } : null;
     v.pathEnded = false;
@@ -177,19 +170,14 @@ export class TrafficSystem {
     const start = city.lanes[from.lane]!;
     const end = city.lanes[to.lane]!;
     if (from.lane === to.lane && to.s > from.s + 6) return to.s - from.s;
-    const segs = routeSegments(city, start.seg, start.index, end.seg);
+    const segs = routeSegments(city, start.seg, start.index, end.seg, undefined, false, to.lane);
     if (!segs) return null;
-    const idx = laneIndexesFor(city, segs, 0, 'curb');
+    const steps = chooseLanes(city, segs, from.lane, to.lane, laneIndexesFor(city, segs, 0, 'curb'));
+    if (!steps) return null;
     let meters = start.length - from.s;
-    let prev = start;
-    for (let i = 1; i < segs.length; i++) {
-      const seg = city.segments[segs[i]!]!;
-      const laneId = i === segs.length - 1 ? to.lane : seg.lanes[Math.min(idx[i]!, seg.lanes.length - 1)]!;
-      const conn = prev.out.map((c) => city.connectors[c]!).find((c) => c.to === laneId);
-      const lane = city.lanes[laneId]!;
-      meters += (conn ? conn.line.length : dist(prev.end, lane.start)) + (i === segs.length - 1 ? to.s : lane.length);
-      prev = lane;
-    }
+    steps.forEach((step, i) => {
+      meters += city.connectors[step.conn]!.line.length + (i === steps.length - 1 ? to.s : city.lanes[step.lane]!.length);
+    });
     return meters;
   }
 
@@ -199,17 +187,11 @@ export class TrafficSystem {
     const last = v.path[v.path.length - 1];
     if (!last) return false;
     const lane = city.lanes[last.lane]!;
-    const segs = routeSegments(city, lane.seg, lane.index, targetSeg);
+    const segs = routeSegments(city, lane.seg, lane.index, targetSeg, undefined, v.kind === 'BUS');
     if (!segs) return false;
-    const idx = laneIndexesFor(city, segs, v.straightPreference, 'any');
-    for (let i = 1; i < segs.length; i++) {
-      const seg = city.segments[segs[i]!]!;
-      const nextLane = seg.lanes[Math.min(idx[i]!, seg.lanes.length - 1)]!;
-      const prevLane = city.lanes[v.path[v.path.length - 1]!.lane]!;
-      const conn = prevLane.out.map((c) => city.connectors[c]!).find((c) => c.to === nextLane);
-      if (!conn) return false;
-      v.path.push({ lane: nextLane, conn: conn.id });
-    }
+    const rest = chooseLanes(city, segs, last.lane, -1, laneIndexesFor(city, segs, v.straightPreference, 'any'));
+    if (!rest) return false;
+    v.path.push(...rest);
     v.pathEnded = false;
     return true;
   }
@@ -217,27 +199,16 @@ export class TrafficSystem {
   /** Appends an explicit chain of segments (bus loops), choosing legal lanes for each turn. */
   appendSegments(v: Vehicle, segs: number[], preferCurb: boolean): boolean {
     const { city } = this;
-    const last = v.path[v.path.length - 1];
-    if (!last) return false;
-    const chain = [city.lanes[last.lane]!.seg, ...segs];
-    const idx = laneIndexesFor(city, chain, preferCurb ? 9 : v.straightPreference, 'any');
-    // The last step was planned without knowing the next turn; fix its lane if not yet entered.
-    const lastSeg = city.segments[chain[0]!]!;
-    const wanted = lastSeg.lanes[Math.min(idx[0]!, lastSeg.lanes.length - 1)]!;
+    if (!v.path.length) return false;
+    // The last step was planned without knowing the next turn; re-choose it if not yet entered.
     const lastIdx = v.path.length - 1;
-    if (wanted !== last.lane && lastIdx > v.pathIdx) {
-      const prevLane = city.lanes[v.path[lastIdx - 1]!.lane]!;
-      const conn = prevLane.out.map((c) => city.connectors[c]!).find((c) => c.to === wanted);
-      if (conn) v.path[lastIdx] = { lane: wanted, conn: conn.id };
-    }
-    for (let i = 1; i < chain.length; i++) {
-      const seg = city.segments[chain[i]!]!;
-      const nextLane = seg.lanes[Math.min(idx[i]!, seg.lanes.length - 1)]!;
-      const prevLane = city.lanes[v.path[v.path.length - 1]!.lane]!;
-      const conn = prevLane.out.map((c) => city.connectors[c]!).find((c) => c.to === nextLane);
-      if (!conn) return false;
-      v.path.push({ lane: nextLane, conn: conn.id });
-    }
+    const replan = lastIdx > v.pathIdx;
+    const anchor = v.path[replan ? lastIdx - 1 : lastIdx]!;
+    const chain = [city.lanes[anchor.lane]!.seg, ...(replan ? [city.lanes[v.path[lastIdx]!.lane]!.seg] : []), ...segs];
+    const rest = chooseLanes(city, chain, anchor.lane, -1, laneIndexesFor(city, chain, preferCurb ? 9 : v.straightPreference, 'any'));
+    if (!rest) return false;
+    if (replan) v.path.pop();
+    v.path.push(...rest);
     v.pathEnded = false;
     return true;
   }

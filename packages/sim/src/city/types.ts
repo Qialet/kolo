@@ -46,6 +46,8 @@ export interface CityNode {
   out: number[];
   signal: SignalPlan | null;
   name: string;
+  /** Cut by the district frame: vehicles appear and disappear here. */
+  boundary?: boolean;
 }
 
 export interface Segment {
@@ -66,6 +68,13 @@ export interface Segment {
   rank: number;
   /** Signal phase of this approach at the end node (0 when unsignalised). */
   phase: number;
+  /** Bus / trolleybus only: cars never route over it. */
+  psvOnly?: boolean;
+  /**
+   * In the main strongly connected network: every core segment reaches every other one without
+   * leaving the map. Taxis, addresses and orders live here; frame entries and exits are not core.
+   */
+  core?: boolean;
 }
 
 export interface Lane {
