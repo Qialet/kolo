@@ -1,6 +1,7 @@
 export * from './geometry.js';
 export * from './rng.js';
 export * from './city/types.js';
+export type * from './city/district.js';
 export { buildCity, lanePoint, DEFAULT_CITY_SEED, STOP_SETBACK } from './city/build.js';
 export { SIDEWALK, WORLD_HALF } from './city/layout.js';
 export * from './engine/signals.js';
