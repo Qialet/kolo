@@ -39,7 +39,7 @@ function approachesOf(city: City): Approach[] {
     for (const segId of node.in) {
       const seg = city.segments[segId]!;
       const street = city.streets[seg.street]!;
-      const d = seg.dir;
+      const d = seg.dirIn;
       const right = { x: -d.z, z: d.x };
       const half = seg.axis === 'NS' ? node.halfZ : node.halfX;
       const back = half + 1.2;

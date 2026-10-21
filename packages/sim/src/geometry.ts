@@ -53,6 +53,26 @@ export function poseAt(line: Polyline, s: number): Pose {
   return { x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t, heading: Math.atan2(b.x - a.x, b.z - a.z) };
 }
 
+/**
+ * Pose at arc length `s`, shifted `lateral` metres to the right of the local direction.
+ * Past either end the first / last piece is extended straight (vehicles straddling a lane end).
+ */
+export function poseAlong(line: Polyline, s: number, lateral = 0): Pose {
+  const { points, cum } = line;
+  let i = 1;
+  while (i < points.length - 1 && (cum[i] as number) < s) i++;
+  const a = points[i - 1] as Vec2;
+  const b = points[i] as Vec2;
+  const segLen = (cum[i] as number) - (cum[i - 1] as number) || 1;
+  const d = { x: (b.x - a.x) / segLen, z: (b.z - a.z) / segLen };
+  const t = s - (cum[i - 1] as number);
+  return { x: a.x + d.x * t - d.z * lateral, z: a.z + d.z * t + d.x * lateral, heading: Math.atan2(d.x, d.z) };
+}
+
+/** Unit direction of a polyline at its start / end. */
+export const startTangent = (line: Polyline): Vec2 => norm(sub(line.points[1]!, line.points[0]!));
+export const endTangent = (line: Polyline): Vec2 => norm(sub(line.points[line.points.length - 1]!, line.points[line.points.length - 2]!));
+
 export function quadBezier(p0: Vec2, c: Vec2, p1: Vec2, steps = 10): Vec2[] {
   const out: Vec2[] = [];
   for (let i = 0; i <= steps; i++) {

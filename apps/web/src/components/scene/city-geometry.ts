@@ -75,8 +75,8 @@ export function buildGroundGeometry(city: City) {
       const endOff = (along ? b.halfZ : b.halfX) + STOP_SETBACK + 0.5;
       const len = seg.length - startOff - endOff;
       const mid = startOff + len / 2;
-      const cx = a.x + seg.dir.x * mid;
-      const cz = a.z + seg.dir.z * mid;
+      const cx = a.x + seg.dirIn.x * mid;
+      const cz = a.z + seg.dirIn.z * mid;
       parts.push(gradientBox(along ? street.median * 1.6 : len, 0.22, along ? len : street.median * 1.6, cx, 0, cz, palette.median, palette.sidewalk));
     }
   }
@@ -92,14 +92,14 @@ export function buildMarkingsGeometry(city: City) {
     const a = city.nodes[seg.from]!;
     const b = city.nodes[seg.to]!;
     const along = seg.axis === 'NS';
-    const right = { x: -seg.dir.z, z: seg.dir.x };
+    const right = { x: -seg.dirIn.z, z: seg.dirIn.x };
     const startOff = (along ? a.halfZ : a.halfX) + STOP_SETBACK;
     const endOff = (along ? b.halfZ : b.halfX) + STOP_SETBACK;
     const rot = along ? 0 : Math.PI / 2;
     const dashed = (offset: number, width: number, dash: number, gap: number) => {
       for (let s = startOff + 1; s < seg.length - endOff - dash; s += dash + gap) {
         const m = s + dash / 2;
-        parts.push(quad(width, dash, a.x + seg.dir.x * m + right.x * offset, y, a.z + seg.dir.z * m + right.z * offset, palette.marking, rot));
+        parts.push(quad(width, dash, a.x + seg.dirIn.x * m + right.x * offset, y, a.z + seg.dirIn.z * m + right.z * offset, palette.marking, rot));
       }
     };
     if (street.lanesPerDir > 1) dashed(street.median + street.laneWidth, 0.14, 3, 6);
@@ -110,7 +110,7 @@ export function buildMarkingsGeometry(city: City) {
       const w = street.halfWidth - street.median;
       const m = seg.length - endOff + 0.3;
       const off = street.median + w / 2;
-      parts.push(quad(along ? w : 0.45, along ? 0.45 : w, a.x + seg.dir.x * m + right.x * off, y + 0.002, a.z + seg.dir.z * m + right.z * off, palette.marking));
+      parts.push(quad(along ? w : 0.45, along ? 0.45 : w, a.x + seg.dirIn.x * m + right.x * off, y + 0.002, a.z + seg.dirIn.z * m + right.z * off, palette.marking));
     }
   }
   // Zebra crossings on every leg of every junction.
@@ -121,8 +121,8 @@ export function buildMarkingsGeometry(city: City) {
       const along = seg.axis === 'NS';
       const half = along ? node.halfZ : node.halfX;
       const centre = half + STOP_SETBACK / 2;
-      const cx = node.x + seg.dir.x * centre;
-      const cz = node.z + seg.dir.z * centre;
+      const cx = node.x + seg.dirIn.x * centre;
+      const cz = node.z + seg.dirIn.z * centre;
       for (let t = -street.halfWidth + 0.6; t < street.halfWidth - 0.3; t += 1.1) {
         const px = along ? cx + t : cx;
         const pz = along ? cz : cz + t;

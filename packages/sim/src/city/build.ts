@@ -7,6 +7,7 @@ import {
   lineIntersection,
   polyline,
   polylinesConflict,
+  poseAlong,
   quadBezier,
   rightOf,
   scale,
@@ -172,7 +173,8 @@ function buildSegments(b: Builder) {
         to: to.id,
         street: street.id,
         axis: street.axis,
-        dir: d,
+        dirIn: d,
+        dirOut: d,
         lanes: [],
         length: dist(from, to),
         speed: street.speed,
@@ -212,20 +214,20 @@ function buildLanes(b: Builder) {
     const street = city.streets[seg.street]!;
     const from = city.nodes[seg.from]!;
     const to = city.nodes[seg.to]!;
-    const right = rightOf(seg.dir);
+    const dir = seg.dirIn;
+    const right = rightOf(dir);
     for (let i = 0; i < street.lanesPerDir; i++) {
       const offset = street.median + (i + 0.5) * street.laneWidth;
-      const start = add(add(from, scale(seg.dir, boxHalfAlong(from, seg.dir) + STOP_SETBACK)), scale(right, offset));
-      const end = add(add(to, scale(seg.dir, -(boxHalfAlong(to, seg.dir) + STOP_SETBACK))), scale(right, offset));
+      const start = add(add(from, scale(dir, boxHalfAlong(from, dir) + STOP_SETBACK)), scale(right, offset));
+      const end = add(add(to, scale(dir, -(boxHalfAlong(to, dir) + STOP_SETBACK))), scale(right, offset));
       const lane: Lane = {
         id: city.lanes.length,
         seg: seg.id,
         index: i,
         lanesInSeg: street.lanesPerDir,
+        line: polyline([v(start.x, start.z), v(end.x, end.z)]),
         start: v(start.x, start.z),
         end: v(end.x, end.z),
-        dir: seg.dir,
-        right,
         length: dist(start, end),
         offset,
         out: [],
@@ -253,7 +255,7 @@ function buildConnectors(b: Builder) {
       for (const outSegId of node.out) {
         const outSeg = city.segments[outSegId]!;
         if (outSeg.id === inSeg.reverse) continue;
-        const turn = turnOf(inSeg.dir, outSeg.dir);
+        const turn = turnOf(inSeg.dirOut, outSeg.dirIn);
         if (!turn) continue;
         for (const inLaneId of inSeg.lanes) {
           const inLane = city.lanes[inLaneId]!;
@@ -267,7 +269,7 @@ function buildConnectors(b: Builder) {
             if (turn === 'S') {
               points = [inLane.end, outLane.start];
             } else {
-              const c = lineIntersection(inLane.end, inLane.dir, outLane.start, outLane.dir) ?? node;
+              const c = lineIntersection(inLane.end, inSeg.dirOut, outLane.start, outSeg.dirIn) ?? node;
               points = quadBezier(inLane.end, c, outLane.start, 10);
               const radius = Math.min(dist(c, inLane.end), dist(c, outLane.start));
               vmax = Math.max(3.5, Math.min(vmax, Math.sqrt(2.4 * radius)));
@@ -321,7 +323,7 @@ function configureJunctions(b: Builder) {
       const offset = hs.cls === 'boulevard' ? ((node.x + WORLD_HALF) / 12.5) % cycle : rng.range(0, cycle);
       node.signal = { phases: [{ green: greenNs }, { green: greenEw }], offset };
     } else if (degree === 3) {
-      const nsThrough = node.out.some((s) => city.segments[s]!.dir.z < 0) && node.out.some((s) => city.segments[s]!.dir.z > 0);
+      const nsThrough = node.out.some((s) => city.segments[s]!.dirIn.z < 0) && node.out.some((s) => city.segments[s]!.dirIn.z > 0);
       priority = nsThrough ? 'NS' : 'EW';
     }
     for (const segId of node.in) {
@@ -419,10 +421,10 @@ function curbFor(b: Builder, side: Side, street: Street, along: number): CurbRef
   const want: Vec2 = side === 'N' ? v(1, 0) : side === 'S' ? v(-1, 0) : side === 'W' ? v(0, -1) : v(0, 1);
   let best: { seg: Segment; lane: Lane; s: number; err: number } | null = null;
   for (const seg of city.segments) {
-    if (seg.street !== street.id || seg.dir.x !== want.x || seg.dir.z !== want.z) continue;
+    if (seg.street !== street.id || seg.dirIn.x !== want.x || seg.dirIn.z !== want.z) continue;
     const lane = city.lanes[seg.lanes[seg.lanes.length - 1]!]!;
     const p = street.axis === 'EW' ? v(along, lane.start.z) : v(lane.start.x, along);
-    const s = dot(sub(p, lane.start), lane.dir);
+    const s = dot(sub(p, lane.start), seg.dirIn);
     const clamped = Math.max(8, Math.min(lane.length - 8, s));
     const err = Math.abs(clamped - s);
     if (!best || err < best.err) best = { seg, lane, s: clamped, err };
@@ -844,14 +846,14 @@ function buildBusLines(b: Builder) {
       const seg = city.segments[segId]!;
       // A bus about to turn left from a multi-lane road is in the inner lane, not at the curb.
       const nextSeg = city.segments[segments[(i + 1) % segments.length]!]!;
-      if (seg.lanes.length > 1 && turnOf(seg.dir, nextSeg.dir) === 'L') return;
+      if (seg.lanes.length > 1 && turnOf(seg.dirOut, nextSeg.dirIn) === 'L') return;
       const laneId = seg.lanes[seg.lanes.length - 1]!;
       let stop = city.busStops.find((s) => s.lane === laneId);
       if (!stop) {
         const lane = city.lanes[laneId]!;
         const s = lane.length * 0.55;
         const street = city.streets[seg.street]!;
-        const p = add(add(lane.start, scale(lane.dir, s)), scale(lane.right, street.halfWidth - lane.offset + SIDEWALK * 0.65));
+        const p = lanePoint(city, laneId, s, street.halfWidth - lane.offset + SIDEWALK * 0.65);
         const cross = city.streets[seg.axis === 'NS' ? city.nodes[seg.to]!.hStreet : city.nodes[seg.to]!.vStreet]!;
         stop = {
           id: `S${city.busStops.length + 1}`,
@@ -860,7 +862,7 @@ function buildBusLines(b: Builder) {
           s,
           x: p.x,
           z: p.z,
-          heading: headingOf(lane.dir),
+          heading: headingOf(seg.dirIn),
           lines: [],
         };
         city.busStops.push(stop);
@@ -881,10 +883,10 @@ function buildStreetTrees(b: Builder) {
       const from = city.nodes[seg.from]!;
       const to = city.nodes[seg.to]!;
       const len = dist(from, to);
-      const right = rightOf(seg.dir);
+      const right = rightOf(seg.dirIn);
       for (let s = 24; s < len - 24; s += 16) {
         for (const sideSign of [1, -1]) {
-          const p = add(add(from, scale(seg.dir, s)), scale(right, sideSign * (street.halfWidth + SIDEWALK * 0.5)));
+          const p = add(add(from, scale(seg.dirIn, s)), scale(right, sideSign * (street.halfWidth + SIDEWALK * 0.5)));
           if (city.busStops.some((st) => dist(st, p) < 14)) continue;
           city.trees.push({ x: p.x, z: p.z, r: rng.range(2.2, 3), h: rng.range(6.5, 8.5) });
         }
@@ -928,7 +930,7 @@ function buildParkedCars(b: Builder) {
       if (spans.some(([s0, s1]) => s + half > s0 && s - half < s1)) continue;
       if (!rng.chance(fill)) continue;
       const p = lanePoint(city, lane.id, s + rng.range(-0.3, 0.3), lateral);
-      city.parkedCars.push({ x: p.x, z: p.z, heading: headingOf(lane.dir), tint: rng.int(0, 6) });
+      city.parkedCars.push({ x: p.x, z: p.z, heading: headingOf(seg.dirIn), tint: rng.int(0, 6) });
     }
   }
 }
@@ -957,6 +959,6 @@ function numberAddresses(b: Builder) {
 
 /** Convenience used by the engine and renderer. */
 export function lanePoint(city: City, laneId: number, s: number, lateral = 0): Vec2 {
-  const lane = city.lanes[laneId]!;
-  return add(add(lane.start, scale(lane.dir, s)), scale(lane.right, lateral));
+  const p = poseAlong(city.lanes[laneId]!.line, s, lateral);
+  return { x: p.x, z: p.z };
 }

@@ -1,11 +1,15 @@
 import type { City, Segment, Turn } from '../city/types.js';
 import { cross, dot } from '../geometry.js';
 
+const STRAIGHT_MAX = (35 * Math.PI) / 180;
+const UTURN_MIN = (150 * Math.PI) / 180;
+
+/** Turn from the exit tangent of `a` onto the entry tangent of `b`; null for a U-turn. */
 export function turnBetween(a: Segment, b: Segment): Turn | null {
-  const c = cross(a.dir, b.dir);
-  if (c > 0.5) return 'R';
-  if (c < -0.5) return 'L';
-  return dot(a.dir, b.dir) > 0 ? 'S' : null;
+  const angle = Math.atan2(cross(a.dirOut, b.dirIn), dot(a.dirOut, b.dirIn));
+  if (Math.abs(angle) > UTURN_MIN) return null;
+  if (Math.abs(angle) <= STRAIGHT_MAX) return 'S';
+  return angle > 0 ? 'R' : 'L';
 }
 
 const TURN_PENALTY: Record<Turn, number> = { S: 0, R: 3, L: 7 };

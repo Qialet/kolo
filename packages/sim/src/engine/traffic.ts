@@ -1,7 +1,7 @@
 import type { LightMode, VehicleKind } from '@kolo/contracts';
 import { lanePoint } from '../city/build.js';
 import type { City, Connector, CurbRef, Lane, Segment } from '../city/types.js';
-import { dist, headingOf, polyline, poseAt, type Polyline, type Pose, type Vec2 } from '../geometry.js';
+import { dist, dot, polyline, poseAlong, poseAt, type Polyline, type Pose, type Vec2 } from '../geometry.js';
 import type { Rng } from '../rng.js';
 import { laneIndexesFor, routeSegments, turnBetween } from './routing.js';
 import { isFlashing, signalState, type SignalRuntime, type SignalState } from './signals.js';
@@ -464,10 +464,10 @@ export class TrafficSystem {
 
   private approachingOpposite(inSegs: number[], c: Connector, range: number) {
     const { city } = this;
-    const myDir = city.lanes[c.from]!.dir;
+    const myDir = city.segments[city.lanes[c.from]!.seg]!.dirOut;
     for (const segId of inSegs) {
       const seg = city.segments[segId]!;
-      if (seg.dir.x !== -myDir.x || seg.dir.z !== -myDir.z) continue;
+      if (dot(seg.dirOut, myDir) > -0.8) continue;
       // Opposing left turners do not yield to each other (they turn simultaneously).
       if (this.anyApproaching(seg.lanes, c, range, true)) return true;
     }
@@ -654,11 +654,7 @@ export class TrafficSystem {
 }
 
 function lanePose(lane: Lane, s: number, lateral: number): Pose {
-  return {
-    x: lane.start.x + lane.dir.x * s + lane.right.x * lateral,
-    z: lane.start.z + lane.dir.z * s + lane.right.z * lateral,
-    heading: headingOf(lane.dir),
-  };
+  return poseAlong(lane.line, s, lateral);
 }
 
 /** Intelligent Driver Model. */

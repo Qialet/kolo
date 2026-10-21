@@ -53,8 +53,11 @@ export interface Segment {
   from: number;
   to: number;
   street: number;
+  /** Procedural grid only (renderer); the engine never reads it. */
   axis: Axis;
-  dir: Vec2;
+  /** Unit travel direction where the segment leaves its start node / enters its end node. */
+  dirIn: Vec2;
+  dirOut: Vec2;
   lanes: number[];
   length: number;
   speed: number;
@@ -71,10 +74,10 @@ export interface Lane {
   /** 0 = inner (next to the centre line), lanesInSeg - 1 = curb lane. */
   index: number;
   lanesInSeg: number;
+  /** Centre line from the start stop line to the end stop line. */
+  line: Polyline;
   start: Vec2;
   end: Vec2;
-  dir: Vec2;
-  right: Vec2;
   length: number;
   offset: number;
   out: number[];
