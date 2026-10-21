@@ -1,7 +1,7 @@
 import type { LightMode, VehicleKind } from '@kolo/contracts';
 import { lanePoint } from '../city/build.js';
 import type { City, Connector, CurbRef, Lane } from '../city/types.js';
-import { headingOf, polyline, poseAt, type Polyline, type Pose, type Vec2 } from '../geometry.js';
+import { dist, headingOf, polyline, poseAt, type Polyline, type Pose, type Vec2 } from '../geometry.js';
 import type { Rng } from '../rng.js';
 import { laneIndexesFor, routeSegments, turnBetween } from './routing.js';
 import { aspectFor, signalState, type SignalRuntime, type SignalState } from './signals.js';
@@ -166,6 +166,31 @@ export class TrafficSystem {
     v.arrived = false;
     v.committed = -1;
     return true;
+  }
+
+  /**
+   * Road distance between two curb points along the route a car would take
+   * (rest of the start lane, junction connectors, whole lanes, part of the last lane).
+   */
+  routeDistance(from: CurbRef, to: CurbRef): number | null {
+    const { city } = this;
+    const start = city.lanes[from.lane]!;
+    const end = city.lanes[to.lane]!;
+    if (from.lane === to.lane && to.s > from.s + 6) return to.s - from.s;
+    const segs = routeSegments(city, start.seg, start.index, end.seg);
+    if (!segs) return null;
+    const idx = laneIndexesFor(city, segs, 0, 'curb');
+    let meters = start.length - from.s;
+    let prev = start;
+    for (let i = 1; i < segs.length; i++) {
+      const seg = city.segments[segs[i]!]!;
+      const laneId = i === segs.length - 1 ? to.lane : seg.lanes[Math.min(idx[i]!, seg.lanes.length - 1)]!;
+      const conn = prev.out.map((c) => city.connectors[c]!).find((c) => c.to === laneId);
+      const lane = city.lanes[laneId]!;
+      meters += (conn ? conn.line.length : dist(prev.end, lane.start)) + (i === segs.length - 1 ? to.s : lane.length);
+      prev = lane;
+    }
+    return meters;
   }
 
   /** Appends a route continuing from the last lane of the current path (used for loops and endless trips). */

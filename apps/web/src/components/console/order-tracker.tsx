@@ -1,6 +1,6 @@
 'use client';
 
-import type { OrderDto, OrderEventType } from '@kolo/contracts';
+import { ACTIVE_ORDER_STATUSES, type OrderDto, type OrderEventType } from '@kolo/contracts';
 import { CarTaxiFrontIcon, CheckIcon, FlagIcon, MapPinIcon, ReceiptTextIcon, UserCheckIcon, XIcon } from 'lucide-react';
 import { ORDER_LABEL, orderTone } from '@/lib/palette';
 import { useOrder, useTaxi } from '@/lib/queries';
@@ -23,11 +23,18 @@ export function OrderTracker() {
   const taxi = useTaxi(taxiId);
   const orderId = selection?.kind === 'order' ? selection.id : (taxi.data?.order?.id ?? null);
   const { data } = useOrder(orderId);
+  // A selected order still shows live progress: poll the taxi serving it.
+  const serving = useTaxi(!taxiId && data && ACTIVE_ORDER_STATUSES.includes(data.status) ? data.vehicleId : null);
   if (!orderId || !data) return null;
-  return <Tracker order={data} etaSec={taxi.data?.etaSec} remaining={taxi.data?.remainingMeters} />;
+  const live = taxiId ? taxi.data : serving.data;
+  const leg = live?.order?.id === data.id ? live : undefined;
+  return <Tracker order={data} etaSec={leg?.etaSec} remaining={leg?.remainingMeters} progress={leg?.progress} />;
 }
 
-function Tracker({ order, etaSec, remaining }: { order: OrderDto; etaSec: number | undefined; remaining: number | undefined }) {
+/** Steps whose outgoing line is a driven leg: assigned → arrived (pickup) and picked up → completed (trip). */
+const LEG_FROM = new Set([1, 3]);
+
+function Tracker({ order, etaSec, remaining, progress }: { order: OrderDto; etaSec: number | undefined; remaining: number | undefined; progress: number | undefined }) {
   const select = useUi((s) => s.select);
   const times = new Map<OrderEventType, string>();
   for (const e of order.events ?? []) if (!times.has(e.type)) times.set(e.type, e.at);
@@ -52,7 +59,13 @@ function Tracker({ order, etaSec, remaining }: { order: OrderDto; etaSec: number
           const t = times.get(s.type);
           return (
             <li key={s.type} className="flex items-start">
-              {i > 0 && <div className={cn('mt-[17px] h-0.5 w-10', done ? 'bg-foreground' : 'bg-border')} />}
+              {i > 0 && (
+                <div className={cn('relative mt-[17px] h-0.5 w-10 overflow-hidden', done ? 'bg-foreground' : 'bg-border')}>
+                  {!done && !failed && i - 1 === reached && LEG_FROM.has(reached) && progress !== undefined && (
+                    <div className="absolute inset-y-0 left-0 bg-taxi transition-[width] duration-700" style={{ width: `${Math.round(progress * 100)}%` }} />
+                  )}
+                </div>
+              )}
               <div className="flex w-[92px] flex-col items-center text-center">
                 <div
                   className={cn(

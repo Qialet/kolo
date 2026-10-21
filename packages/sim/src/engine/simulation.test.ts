@@ -52,6 +52,38 @@ describe('Simulation', () => {
     expect(frame.vehicles.length).toBeGreaterThan(80);
   });
 
+  it('prices orders by road distance and reports trip progress along the driven route', () => {
+    const city = buildCity();
+    let completedMeters = 0;
+    const sim = new Simulation(city, fleet(8), {
+      trafficDensity: 0.2,
+      demand: 0,
+      hooks: { onOrderEvent: (o, e) => e.type === 'COMPLETED' && (completedMeters = o.distanceMeters) },
+    });
+    const pickup = city.addresses[5]!;
+    const dropoff = [...city.addresses].sort((a, b) => Math.hypot(b.x - pickup.x, b.z - pickup.z) - Math.hypot(a.x - pickup.x, a.z - pickup.z))[40]!;
+    const order = sim.createOrder({ pickupId: pickup.id, dropoffId: dropoff.id })!;
+    const straight = Math.hypot(dropoff.x - pickup.x, dropoff.z - pickup.z);
+    expect(order.distanceMeters).toBeGreaterThan(straight);
+    expect(order.distanceMeters).toBeLessThan(straight * 2);
+
+    const progress: number[] = [];
+    for (let i = 0; i < 20 * 900 && !completedMeters; i++) {
+      sim.step(0.05);
+      if (i % 20 !== 0) continue;
+      const taxi = sim.orders.get(order.id)?.vehicleId;
+      const detail = taxi ? sim.taxiDetail(taxi) : null;
+      if (detail?.activity === 'ON_TRIP' && detail.route.length) progress.push(detail.progress);
+    }
+    expect(completedMeters).toBeGreaterThan(0);
+    expect(progress.length).toBeGreaterThan(10);
+    expect(progress[0]!).toBeLessThan(0.1);
+    expect(progress[progress.length - 1]!).toBeGreaterThan(0.85);
+    for (let k = 1; k < progress.length; k++) expect(progress[k]!).toBeGreaterThanOrEqual(progress[k - 1]! - 0.02);
+    // The planned road distance matches what the taxi actually drove.
+    expect(Math.abs(completedMeters - order.distanceMeters) / order.distanceMeters).toBeLessThan(0.2);
+  });
+
   it('sends a taxi to the service box and back on line on admin command', () => {
     const city = buildCity();
     const sim = new Simulation(city, fleet(6), { trafficDensity: 0.2, demand: 0 });

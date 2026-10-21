@@ -81,6 +81,8 @@ export interface TaxiDetail {
   routeTarget: PlaceRef | null;
   remainingMeters: number;
   etaSec: number;
+  /** Share of the current leg already driven (0..1): odometer since the leg began vs. the remaining route. */
+  progress: number;
   order: OrderSummary | null;
   tripsToday: number;
   earningsRsd: number;

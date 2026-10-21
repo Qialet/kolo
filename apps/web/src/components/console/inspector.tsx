@@ -140,7 +140,6 @@ function TaxiInspector({ id }: { id: string }) {
   if (!data) return <InspectorSkeleton />;
   const order = data.order;
   const toPickup = data.activity === 'TO_PICKUP' || data.activity === 'AT_PICKUP';
-  const progress = order && data.remainingMeters && order.distanceMeters ? Math.max(4, Math.min(100, 100 - (data.remainingMeters / Math.max(order.distanceMeters, data.remainingMeters)) * 100)) : 0;
   return (
     <>
       <InspectorHeader
@@ -174,7 +173,7 @@ function TaxiInspector({ id }: { id: string }) {
                   <div className="tabular text-[15px] font-semibold">≈ {fmtDuration(data.etaSec)}</div>
                 </div>
               </div>
-              {order && data.activity === 'ON_TRIP' && <Progress value={progress} className="mt-3" />}
+              {order && (toPickup || data.activity === 'ON_TRIP') && <Progress value={Math.max(3, data.progress * 100)} className="mt-3" />}
             </div>
           </Section>
         )}

@@ -96,6 +96,8 @@ interface Taxi {
   auto: boolean;
   repairUntil: number;
   idleSince: number;
+  /** Odometer reading when the current leg (to a new target) began. */
+  legOdo: number;
 }
 
 interface Bus {
@@ -215,6 +217,7 @@ export class Simulation {
         auto: true,
         repairUntil: 0,
         idleSince: 0,
+        legOdo: 0,
       };
       this.taxis.set(info.id, taxi);
       this.traffic.add(v);
@@ -347,9 +350,11 @@ export class Simulation {
     taxi.activity = activity;
   }
 
-  private driveTo(taxi: Taxi, place: Place): boolean {
+  /** Plans a route to `place`; a new leg restarts the progress counter, a re-plan keeps it. */
+  private driveTo(taxi: Taxi, place: Place, newLeg = true): boolean {
     const ok = this.traffic.planTo(taxi.v, place, (segId) => this.traffic.vehiclesOnSegment(segId) * 0.8);
     if (!ok) return false;
+    if (newLeg) taxi.legOdo = taxi.v.odometer;
     taxi.target = place;
     if (taxi.v.mode === 'pulled') taxi.v.wantsDepart = true;
     return true;
@@ -395,7 +400,7 @@ export class Simulation {
     }
     if ((taxi.activity === 'TO_PICKUP' || taxi.activity === 'ON_TRIP' || taxi.activity === 'TO_PARK' || taxi.activity === 'TO_SERVICE' || taxi.activity === 'FREE') && v.pathEnded && !v.stop && v.mode === 'lane' && taxi.target) {
       // Lost the stop (e.g. re-planned mid-junction): plan again.
-      this.driveTo(taxi, taxi.target);
+      this.driveTo(taxi, taxi.target, false);
     }
   }
 
@@ -619,7 +624,8 @@ export class Simulation {
     const pickup = this.places.get(input.pickupId);
     const dropoff = this.places.get(input.dropoffId);
     if (!pickup || !dropoff || pickup.id === dropoff.id) return null;
-    const estDistance = Math.round((Math.abs(pickup.x - dropoff.x) + Math.abs(pickup.z - dropoff.z)) * 1.1);
+    const road = this.traffic.routeDistance(pickup, dropoff);
+    const estDistance = Math.round(road ?? (Math.abs(pickup.x - dropoff.x) + Math.abs(pickup.z - dropoff.z)) * 1.1);
     const order: SimOrder = {
       id: crypto.randomUUID(),
       code: `KL-${++this.orderSeq}`,
@@ -978,6 +984,7 @@ export class Simulation {
     const order = taxi.orderId ? this.orders.get(taxi.orderId) : undefined;
     const showRoute = taxi.activity !== 'PARKED' && taxi.activity !== 'IN_SERVICE' && (taxi.v.mode === 'lane' || taxi.v.mode === 'conn' || (taxi.v.mode === 'pulled' && taxi.v.wantsDepart));
     const meters = showRoute ? Math.round(route.meters) : 0;
+    const driven = Math.max(0, taxi.v.odometer - taxi.legOdo);
     return {
       id,
       plate: taxi.info.plate,
@@ -995,6 +1002,7 @@ export class Simulation {
       routeTarget: taxi.target && showRoute ? placeRef(taxi.target) : null,
       remainingMeters: meters,
       etaSec: Math.round(meters / 8.3),
+      progress: showRoute && driven + meters > 0 ? Math.round((driven / (driven + meters)) * 1000) / 1000 : 0,
       order: order ? this.summary(order) : null,
       tripsToday: taxi.trips,
       earningsRsd: taxi.earnings,
