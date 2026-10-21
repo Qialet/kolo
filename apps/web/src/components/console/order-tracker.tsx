@@ -41,8 +41,8 @@ function Tracker({ order, etaSec, remaining, progress }: { order: OrderDto; etaS
   const failed = order.status === 'CANCELLED' || order.status === 'NO_SHOW' || order.status === 'EXPIRED';
   const reached = STEPS.reduce((acc, s, i) => (times.has(s.type) ? i : acc), 0);
   return (
-    <div className="glass-panel pointer-events-auto flex items-stretch gap-4 p-3 pr-4">
-      <div className="flex flex-col justify-center gap-1 pl-1">
+    <div className="glass-panel pointer-events-auto flex items-stretch gap-4 p-3 pr-4 max-xl:p-2">
+      <div className="flex flex-col justify-center gap-1 pl-1 max-2xl:hidden">
         <div className="flex items-center gap-2 text-[15px] font-bold">
           <CarTaxiFrontIcon className="size-5 text-taxi-foreground" />
           Отслеживание заказа
@@ -51,7 +51,7 @@ function Tracker({ order, etaSec, remaining, progress }: { order: OrderDto; etaS
           {order.code} · {order.vehiclePlate ?? 'поиск машины'}
         </div>
       </div>
-      <ol className="flex items-start">
+      <ol className="flex items-start max-xl:hidden">
         {STEPS.map((s, i) => {
           const done = times.has(s.type);
           const current = i === reached && !failed && order.status !== 'COMPLETED';
@@ -60,13 +60,13 @@ function Tracker({ order, etaSec, remaining, progress }: { order: OrderDto; etaS
           return (
             <li key={s.type} className="flex items-start">
               {i > 0 && (
-                <div className={cn('relative mt-[17px] h-0.5 w-10 overflow-hidden', done ? 'bg-foreground' : 'bg-border')}>
+                <div className={cn('relative mt-[17px] h-0.5 w-10 overflow-hidden max-2xl:w-6', done ? 'bg-foreground' : 'bg-border')}>
                   {!done && !failed && i - 1 === reached && LEG_FROM.has(reached) && progress !== undefined && (
                     <div className="absolute inset-y-0 left-0 bg-taxi transition-[width] duration-700" style={{ width: `${Math.round(progress * 100)}%` }} />
                   )}
                 </div>
               )}
-              <div className="flex w-[92px] flex-col items-center text-center">
+              <div className="flex w-[92px] flex-col items-center text-center max-2xl:w-[76px]">
                 <div
                   className={cn(
                     'grid size-9 place-items-center rounded-full border-2 transition-colors',

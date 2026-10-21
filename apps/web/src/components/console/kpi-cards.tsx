@@ -9,24 +9,27 @@ import { fmtDuration, fmtRsd } from './common';
 
 function Kpi({ icon, iconClass, title, value, hint }: { icon: ReactNode; iconClass: string; title: string; value: ReactNode; hint: ReactNode }) {
   return (
-    <div className="glass-panel pointer-events-auto flex min-w-48 items-center gap-3 px-3.5 py-3">
-      <div className={cn('grid size-11 shrink-0 place-items-center rounded-xl', iconClass)}>{icon}</div>
+    <div className="glass-panel pointer-events-auto flex min-w-48 items-center gap-3 px-3.5 py-3 max-lg:min-w-44 max-lg:shrink-0 max-lg:snap-start max-md:w-[184px] max-md:min-w-0 max-md:gap-2.5 max-md:px-3 max-md:py-2">
+      <div className={cn('grid size-11 shrink-0 place-items-center rounded-xl max-md:size-9', iconClass)}>{icon}</div>
       <div className="min-w-0">
-        <div className="text-[12px] font-medium text-muted-foreground">{title}</div>
-        <div className="tabular text-[22px] leading-tight font-bold tracking-tight">{value}</div>
+        <div className="truncate text-[12px] font-medium text-muted-foreground">{title}</div>
+        <div className="tabular text-[22px] leading-tight font-bold tracking-tight max-md:text-[18px]">{value}</div>
         <div className="truncate text-[11px] text-muted-foreground">{hint}</div>
       </div>
     </div>
   );
 }
 
+/** Wraps on wide screens; a horizontally scrolling strip on tablets and phones. */
+const STRIP = 'flex gap-3 lg:flex-wrap max-lg:pointer-events-auto max-lg:no-scrollbar max-lg:-mb-4 max-lg:min-w-0 max-lg:flex-1 max-lg:snap-x max-lg:overflow-x-auto max-lg:pb-4 max-md:gap-2';
+
 export function KpiCards() {
   const kpi = useLive((s) => s.kpi);
   if (!kpi) {
     return (
-      <div className="flex gap-3">
+      <div className={STRIP}>
         {[0, 1, 2, 3].map((i) => (
-          <Skeleton key={i} className="h-[76px] w-48 rounded-2xl" />
+          <Skeleton key={i} className="h-[76px] w-48 shrink-0 rounded-2xl max-md:h-[60px] max-md:w-40" />
         ))}
       </div>
     );
@@ -35,7 +38,7 @@ export function KpiCards() {
   const finished = kpi.orders.completed + kpi.orders.cancelled + kpi.orders.noShow + kpi.orders.expired;
   const success = finished ? Math.round((kpi.orders.completed / finished) * 1000) / 10 : 100;
   return (
-    <div className="flex flex-wrap gap-3">
+    <div className={STRIP}>
       <Kpi
         icon={<CarTaxiFrontIcon className="size-5" />}
         iconClass="bg-taxi text-taxi-foreground"

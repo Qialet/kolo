@@ -31,17 +31,18 @@ import { EventFeed } from './event-feed';
 
 export function TopBar({ onSearch }: { onSearch: () => void }) {
   return (
-    <header className="glass-panel pointer-events-auto flex h-14 items-center gap-3 px-3">
-      <KoloLogo className="pr-2" />
-      <Separator orientation="vertical" className="h-7" />
+    <header className="glass-panel pointer-events-auto flex h-14 items-center gap-2 px-2 md:gap-3 md:px-3">
+      <KoloLogo className="lg:pr-2" wordmarkClassName="max-lg:hidden" />
+      <Separator orientation="vertical" className="h-7 max-sm:hidden" />
       <button
         type="button"
         onClick={onSearch}
-        className="flex h-9 w-[clamp(220px,28vw,420px)] items-center gap-2 rounded-xl border bg-background/70 px-3 text-sm text-muted-foreground transition-colors hover:bg-background"
+        aria-label="Поиск"
+        className="flex h-9 shrink-0 items-center gap-2 rounded-xl border bg-background/70 px-2.5 text-sm text-muted-foreground transition-colors hover:bg-background lg:w-[clamp(220px,24vw,420px)] lg:px-3"
       >
         <SearchIcon className="size-4" />
-        <span className="flex-1 text-left">Такси, заказы, адреса, парки…</span>
-        <Kbd>Ctrl K</Kbd>
+        <span className="flex-1 truncate text-left max-lg:hidden">Такси, заказы, адреса, парки…</span>
+        <Kbd className="max-xl:hidden">Ctrl K</Kbd>
       </button>
       <ParkSwitcher />
       <div className="flex-1" />
@@ -49,7 +50,7 @@ export function TopBar({ onSearch }: { onSearch: () => void }) {
       <SimControls />
       <LiveClock />
       <Notifications />
-      <div className="flex items-center gap-2 pl-1">
+      <div className="flex items-center gap-2 pl-1 max-md:hidden">
         <Avatar className="size-8">
           <AvatarFallback className="bg-foreground text-[11px] font-semibold text-background">ДП</AvatarFallback>
         </Avatar>
@@ -75,13 +76,13 @@ function ParkSwitcher() {
     <DropdownMenu>
       <DropdownMenuTrigger
         render={
-          <button type="button" className="flex h-10 items-center gap-2.5 rounded-xl border bg-background/70 py-1 pr-2 pl-1 text-left transition-colors hover:bg-background" />
+          <button type="button" className="flex h-10 min-w-0 items-center gap-2.5 rounded-xl border bg-background/70 py-1 pr-2 pl-1 text-left transition-colors hover:bg-background max-sm:gap-1" />
         }
       >
         <span className="grid size-8 place-items-center rounded-lg bg-depot text-[11px] font-bold text-white">{current?.id ?? 'ALL'}</span>
-        <span className="leading-tight">
-          <span className="block text-[13px] font-semibold">{current?.name ?? 'Все партнёры'}</span>
-          <span className="block text-[11px] text-muted-foreground">
+        <span className="min-w-0 leading-tight max-sm:hidden">
+          <span className="block truncate text-[13px] font-semibold whitespace-nowrap">{current?.name ?? 'Все партнёры'}</span>
+          <span className="block truncate text-[11px] whitespace-nowrap text-muted-foreground max-xl:hidden">
             {current ? `${current.counts.onLine} на линии · ${current.counts.inPark}/${current.capacity} в парке` : `${onLine}/${total} машин на линии`}
           </span>
         </span>
@@ -126,9 +127,9 @@ function ParkSwitcher() {
 function CreateOrderButton() {
   const open = useUi((s) => s.openCreateOrder);
   return (
-    <Button onClick={() => open()} className="h-9 rounded-xl bg-taxi text-taxi-foreground hover:bg-taxi/85">
-      <PlusIcon data-icon="inline-start" />
-      Заказ
+    <Button onClick={() => open()} aria-label="Новый заказ" className="h-9 rounded-xl bg-taxi text-taxi-foreground hover:bg-taxi/85 max-sm:w-9 max-sm:px-0">
+      <PlusIcon data-icon="inline-start" className="max-sm:m-0" />
+      <span className="max-sm:hidden">Заказ</span>
     </Button>
   );
 }
@@ -208,10 +209,13 @@ function LiveClock() {
     };
   }, []);
   return (
-    <div className={cn('flex h-9 items-center gap-2 rounded-xl px-3 text-[13px] font-semibold', connected ? 'bg-pickup/12 text-pickup' : 'bg-destructive/10 text-destructive')}>
+    <div
+      className={cn('flex h-9 items-center gap-2 rounded-xl px-3 text-[13px] font-semibold whitespace-nowrap max-sm:px-2.5', connected ? 'bg-pickup/12 text-pickup' : 'bg-destructive/10 text-destructive')}
+      title={connected ? 'Live' : 'Нет связи'}
+    >
       <span className={cn('size-2 rounded-full', connected ? 'animate-pulse bg-pickup' : 'bg-destructive')} />
-      {connected ? 'Live' : 'Нет связи'}
-      <span className="tabular text-foreground/80">{now?.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) ?? '--:--'}</span>
+      <span className="max-sm:hidden">{connected ? 'Live' : 'Нет связи'}</span>
+      <span className="tabular text-foreground/80 max-lg:hidden">{now?.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) ?? '--:--'}</span>
     </div>
   );
 }
@@ -229,7 +233,7 @@ function Notifications() {
           </span>
         )}
       </PopoverTrigger>
-      <PopoverContent className="w-96 p-0" align="end">
+      <PopoverContent className="w-96 max-w-[calc(100vw-16px)] p-0" align="end">
         <EventFeed />
       </PopoverContent>
     </Popover>

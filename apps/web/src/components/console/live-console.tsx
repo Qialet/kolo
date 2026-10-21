@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { SceneLabels } from '@/components/scene/scene-labels';
 import { connectLive, frameBuffer } from '@/lib/live';
 import { useUi } from '@/lib/ui-store';
+import { cn } from '@/lib/utils';
 import { CommandSearch } from './command-search';
 import { CreateOrderDialog } from './create-order-dialog';
 import { Inspector } from './inspector';
@@ -22,6 +23,7 @@ const CityCanvas = dynamic(() => import('@/components/scene/city-canvas'), {
 /** Full-screen live city with floating control panels. */
 export function LiveConsole() {
   const [searchOpen, setSearchOpen] = useState(false);
+  const selected = useUi((s) => s.selection !== null);
   useEffect(() => {
     connectLive();
     // Handle for automated visual checks (screenshots) in development.
@@ -33,17 +35,18 @@ export function LiveConsole() {
         <CityCanvas />
         <SceneLabels />
       </div>
-      <div className="pointer-events-none absolute inset-0 flex flex-col gap-3 p-3">
+      <div className="pointer-events-none absolute inset-0 flex flex-col gap-2 p-2 md:gap-3 md:p-3">
         <TopBar onSearch={() => setSearchOpen(true)} />
-        <div className="flex min-h-0 flex-1 items-start justify-between gap-3">
+        <div className="flex min-h-0 flex-1 items-start justify-between gap-2 md:gap-3">
           <KpiCards />
-          <div className="flex items-start gap-3">
+          <div className="flex shrink-0 items-start gap-3">
             <MapControls />
             <Inspector />
           </div>
         </div>
-        <div className="flex items-end justify-between gap-3">
-          <div className="min-w-0">
+        {/* On phones the inspector is a bottom sheet and takes this row's place. */}
+        <div className={cn('flex items-end justify-between gap-3', selected && 'max-md:hidden')}>
+          <div className="min-w-0 max-md:hidden">
             <OrderTracker />
           </div>
           <OpsPanel />

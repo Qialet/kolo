@@ -25,7 +25,7 @@ export function Inspector() {
   const selection = useUi((s) => s.selection);
   if (!selection) return null;
   return (
-    <aside className="glass-panel pointer-events-auto flex max-h-[calc(100dvh-420px)] min-h-0 w-[360px] flex-col overflow-hidden">
+    <aside className="glass-panel pointer-events-auto flex max-h-[calc(100dvh-420px)] min-h-0 w-[360px] flex-col overflow-hidden max-lg:max-h-[calc(100dvh-340px)] max-md:fixed max-md:inset-x-2 max-md:bottom-2 max-md:z-20 max-md:max-h-[58dvh] max-md:w-auto">
       <InspectorBody selection={selection} />
     </aside>
   );

@@ -1,8 +1,9 @@
 'use client';
 
 import { TAXI_ACTIVITIES } from '@kolo/contracts';
-import { ChevronRightIcon } from 'lucide-react';
-import { useMemo } from 'react';
+import { ChevronDownIcon, ChevronRightIcon, ChevronUpIcon } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { frameBuffer, useLive } from '@/lib/live';
@@ -10,6 +11,7 @@ import { ACTIVITY_LABEL, activityTone, FLEET_LABEL, fleetTone, ORDER_LABEL, orde
 import { useDisputes, useOrders, useParks, useVehicles } from '@/lib/queries';
 import { useFocusSelect } from '@/lib/use-focus-select';
 import { useUi } from '@/lib/ui-store';
+import { cn } from '@/lib/utils';
 import { fmtRsd, StatusBadge } from './common';
 
 /** Bottom-right operations panel: live orders, fleet, depots and disputes. */
@@ -21,37 +23,44 @@ export function OpsPanel() {
   const filter = useUi((s) => s.parkFilter);
   const active = Object.keys(activeOrders).length;
   const fleet = vehicles.data?.filter((v) => !filter || v.parkId === filter) ?? [];
+  // Phones start with the lists folded so the map stays visible; wider screens always show them.
+  const [open, setOpen] = useState(false);
   return (
-    <div className="glass-panel pointer-events-auto w-[440px] p-2">
-      <Tabs defaultValue="orders">
-        <div className="flex items-center justify-between gap-2 px-1">
-          <TabsList>
+    <div className="glass-panel pointer-events-auto w-[440px] p-2 max-md:w-full">
+      <Tabs defaultValue="orders" onValueChange={() => setOpen(true)}>
+        <div className="flex items-center justify-between gap-1 px-1">
+          <TabsList className="max-sm:[&_.count]:hidden">
             <TabsTrigger value="orders">
-              Заказы <span className="tabular text-muted-foreground">{active}</span>
+              Заказы <span className="count tabular text-muted-foreground">{active}</span>
             </TabsTrigger>
             <TabsTrigger value="fleet">
-              Флот <span className="tabular text-muted-foreground">{fleet.length}</span>
+              Флот <span className="count tabular text-muted-foreground">{fleet.length}</span>
             </TabsTrigger>
             <TabsTrigger value="parks">
-              Парки <span className="tabular text-muted-foreground">{parks.data?.length ?? 0}</span>
+              Парки <span className="count tabular text-muted-foreground">{parks.data?.length ?? 0}</span>
             </TabsTrigger>
             <TabsTrigger value="disputes">
-              Возражения <span className="tabular text-muted-foreground">{disputes.data?.length ?? 0}</span>
+              Возражения <span className="count tabular text-muted-foreground">{disputes.data?.length ?? 0}</span>
             </TabsTrigger>
           </TabsList>
+          <Button variant="ghost" size="icon-sm" className="md:hidden" onClick={() => setOpen((v) => !v)} aria-label={open ? 'Свернуть' : 'Развернуть'}>
+            {open ? <ChevronDownIcon /> : <ChevronUpIcon />}
+          </Button>
         </div>
-        <TabsContent value="orders">
-          <OrdersList />
-        </TabsContent>
-        <TabsContent value="fleet">
-          <FleetList />
-        </TabsContent>
-        <TabsContent value="parks">
-          <ParksList />
-        </TabsContent>
-        <TabsContent value="disputes">
-          <DisputesList />
-        </TabsContent>
+        <div className={cn(!open && 'max-md:hidden')}>
+          <TabsContent value="orders">
+            <OrdersList />
+          </TabsContent>
+          <TabsContent value="fleet">
+            <FleetList />
+          </TabsContent>
+          <TabsContent value="parks">
+            <ParksList />
+          </TabsContent>
+          <TabsContent value="disputes">
+            <DisputesList />
+          </TabsContent>
+        </div>
       </Tabs>
     </div>
   );
@@ -74,7 +83,7 @@ function OrdersList() {
   const go = useFocusSelect();
   const activeList = useMemo(() => Object.values(live).sort((a, b) => b.createdAt - a.createdAt), [live]);
   return (
-    <ScrollArea className="h-[208px]">
+    <ScrollArea className="h-[208px] max-md:h-[32dvh]">
       <ul className="flex flex-col px-0.5">
         {activeList.map((o) => (
           <ListRow key={o.id} onClick={() => go.order(o.id, o.pickup)}>
@@ -121,7 +130,7 @@ function FleetList() {
   }, [kpi]);
   const list = vehicles.data?.filter((v) => !filter || v.parkId === filter) ?? [];
   return (
-    <ScrollArea className="h-[208px]">
+    <ScrollArea className="h-[208px] max-md:h-[32dvh]">
       <ul className="flex flex-col px-0.5">
         {list.map((v) => {
           const activity = activities.get(v.id);
@@ -150,7 +159,7 @@ function ParksList() {
   const parks = useParks();
   const go = useFocusSelect();
   return (
-    <ScrollArea className="h-[208px]">
+    <ScrollArea className="h-[208px] max-md:h-[32dvh]">
       <ul className="flex flex-col px-0.5">
         {parks.data?.map((p) => (
           <ListRow key={p.id} onClick={() => go.depot(p.id)}>
@@ -178,7 +187,7 @@ function DisputesList() {
   const disputes = useDisputes('OPEN');
   const select = useUi((s) => s.select);
   return (
-    <ScrollArea className="h-[208px]">
+    <ScrollArea className="h-[208px] max-md:h-[32dvh]">
       <ul className="flex flex-col px-0.5">
         {disputes.data?.map((d) => (
           <ListRow key={d.id} onClick={() => select({ kind: 'order', id: d.orderId })}>

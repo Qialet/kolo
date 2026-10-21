@@ -24,7 +24,7 @@ export function StatusBadge({ tone, children, className }: { tone: Tone; childre
   );
 }
 
-export function KoloLogo({ className }: { className?: string }) {
+export function KoloLogo({ className, wordmarkClassName }: { className?: string; wordmarkClassName?: string }) {
   return (
     <div className={cn('flex items-center gap-2', className)}>
       <svg viewBox="0 0 32 32" className="size-8" aria-hidden>
@@ -33,7 +33,7 @@ export function KoloLogo({ className }: { className?: string }) {
         <circle cx="16" cy="16" r="2.6" className="fill-taxi" />
         <path d="M16 7.5v4M16 20.5v4M7.5 16h4M20.5 16h4" strokeWidth="2" className="stroke-taxi" strokeLinecap="round" />
       </svg>
-      <div className="leading-none">
+      <div className={cn('leading-none whitespace-nowrap', wordmarkClassName)}>
         <div className="text-[17px] font-bold tracking-tight">Kolo</div>
         <div className="text-[10px] font-medium tracking-wide text-muted-foreground uppercase">Fleet control · Beograd</div>
       </div>
