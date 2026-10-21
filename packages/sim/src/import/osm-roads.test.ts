@@ -131,6 +131,15 @@ describe('importRoads', () => {
     expect(roads.nodes.filter((n) => n.boundary)).toHaveLength(2);
   });
 
+  it('does not join a bridge to the street it passes over', () => {
+    const o = osm();
+    o.way([o.node(-400, 0), o.node(400, 0)], { highway: 'secondary' });
+    o.way([o.node(0, -400), o.node(0, 400)], { highway: 'primary', bridge: 'yes', layer: '1' });
+    const roads = importRoads(o.els, box);
+    expect(roads.edges).toHaveLength(2);
+    expect(roads.edges.find((e) => e.bridge)!.layer).toBe(1);
+  });
+
   it('keeps node tags when Overpass repeats a node as an untagged skeleton', () => {
     const o = osm();
     const c = o.node(0, 0, { highway: 'traffic_signals' });
