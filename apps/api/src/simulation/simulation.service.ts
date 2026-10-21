@@ -36,6 +36,7 @@ export class SimulationService implements OnModuleInit, OnApplicationBootstrap, 
 
   async onModuleInit() {
     await this.seed.ensureSeeded(this.city);
+    await this.seed.syncParks(this.city);
     const orm = this.database.orm;
     await this.closeOrphanedOrders();
     const parks = await orm.Park.all();

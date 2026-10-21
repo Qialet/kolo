@@ -59,4 +59,22 @@ export class SeedService {
     }
     this.log.log(`Seeded ${PARTNERS.length} partners and ${carNo} taxis`);
   }
+
+  /** The generated yard is the source of truth for slots and boxes; keep the park rows in step with it. */
+  async syncParks(city: City) {
+    const orm = this.database.orm;
+    const parks = await orm.Park.all();
+    for (const park of parks) {
+      const depot = city.depots.find((d) => d.id === park.id);
+      if (!depot) continue;
+      const capacity = depot.slots.length;
+      const serviceBoxes = depot.boxes.length;
+      if (park.capacity !== capacity || park.serviceBoxes !== serviceBoxes) {
+        await orm.Park.where({ id: park.id }).update({ capacity, serviceBoxes });
+        this.log.log(`Park ${park.id}: capacity ${park.capacity} → ${capacity}, boxes ${park.serviceBoxes} → ${serviceBoxes}`);
+      }
+      const cars = await orm.Vehicle.where({ parkId: park.id }).aggregate((a) => ({ n: a.count() }));
+      if (cars.n > capacity) this.log.warn(`Park ${park.id} has ${cars.n} cars for ${capacity} slots`);
+    }
+  }
 }

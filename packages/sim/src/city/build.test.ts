@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildCity } from './build.js';
 import { routeSegments } from '../engine/routing.js';
+import { SPECIAL_BLOCKS } from './layout.js';
 
 const city = buildCity();
 
@@ -38,11 +39,14 @@ describe('buildCity', () => {
     }
   });
 
-  it('builds three depots with slots and service boxes', () => {
+  it('builds three depots whose yards fit the planned capacity', () => {
     expect(city.depots.map((d) => d.id).sort()).toEqual(['P1', 'P2', 'P3']);
-    for (const d of city.depots) {
-      expect(d.slots.length).toBeGreaterThanOrEqual(10);
-      expect(d.boxes.length).toBeGreaterThanOrEqual(2);
+    for (const spec of Object.values(SPECIAL_BLOCKS)) {
+      if (spec.kind !== 'depot') continue;
+      const d = city.depots.find((x) => x.id === spec.depotId)!;
+      // The API stores slots.length as the park capacity, so the yard must not run out of room.
+      expect(d.slots, d.id).toHaveLength(spec.capacity);
+      expect(d.boxes, d.id).toHaveLength(spec.boxes);
     }
   });
 
