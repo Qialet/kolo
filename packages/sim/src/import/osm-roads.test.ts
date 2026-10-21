@@ -131,6 +131,16 @@ describe('importRoads', () => {
     expect(roads.nodes.filter((n) => n.boundary)).toHaveLength(2);
   });
 
+  it('keeps node tags when Overpass repeats a node as an untagged skeleton', () => {
+    const o = osm();
+    const c = o.node(0, 0, { highway: 'traffic_signals' });
+    o.way([o.node(-400, 0), c, o.node(400, 0)], { highway: 'secondary' });
+    const dup = o.els.find((e) => e.id === c)!;
+    o.els.push({ type: 'node', id: c, lat: dup.lat, lon: dup.lon });
+    const roads = importRoads(o.els, box);
+    expect(roads.nodes.filter((n) => n.signals)).toHaveLength(1);
+  });
+
   it('maps turn restrictions onto the edges around the via node', () => {
     const o = osm();
     const c = o.node(0, 0);
@@ -175,6 +185,7 @@ describe.runIf(existsSync(RAW))('importRoads on the real Belgrade extract', () =
     const bounds = boundsOf(BELGRADE_BBOX);
     expect(roads.edges.length).toBeGreaterThan(500);
     expect(roads.edges.filter((e) => e.roundabout && e.name === 'Trg Slavija').length).toBeGreaterThan(3);
+    expect(roads.nodes.filter((n) => n.signals).length).toBeGreaterThan(150);
     for (const e of roads.edges) {
       for (let i = 0; i < e.pts.length; i += 2) {
         expect(e.pts[i]!).toBeGreaterThanOrEqual(bounds.x0 - 0.05);

@@ -169,7 +169,8 @@ function clipRuns(points: (Vec2 & { key: string | null })[], r: Rect): RunPoint[
 export function importRoads(elements: OsmElement[], bbox: BBoxDeg): DistrictRoads {
   const bounds = boundsOfBBox(bbox);
   const osmNodes = new Map<number, OsmElement>();
-  for (const e of elements) if (e.type === 'node') osmNodes.set(e.id, e);
+  // Overpass may list a node twice (tagged, then as an untagged skeleton): keep the tagged copy.
+  for (const e of elements) if (e.type === 'node' && (e.tags || !osmNodes.has(e.id))) osmNodes.set(e.id, e);
 
   const ways: WayInfo[] = [];
   for (const e of elements) {

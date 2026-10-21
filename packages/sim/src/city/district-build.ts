@@ -16,6 +16,7 @@ import {
   type Vec2,
 } from '../geometry.js';
 import { turnBetween } from '../engine/routing.js';
+import { cycleOf } from '../engine/signals.js';
 import { largestStronglyConnected } from '../graph.js';
 import type { District, RoadClass, RoadEdge } from './district.js';
 import { SIDEWALK } from './layout.js';
@@ -29,6 +30,12 @@ const CLUSTER_RADIUS = 30;
 /** Length over which a segment's entry / exit direction is measured. */
 const TANGENT_SPAN = 15;
 const CONFLICT_CLEARANCE = 1.6;
+/** OSM puts signal nodes on the approach, up to this far outside the junction circle. */
+const SIGNAL_REACH = 25;
+/** |cos| above which two approaches share a phase (opposite or parallel within 30°). */
+const PHASE_ALIGN = Math.cos((30 * Math.PI) / 180);
+const GREEN_MAIN = 45;
+const GREEN_SIDE = 30;
 
 const RANK: Record<RoadClass, number> = {
   trunk: 6,
@@ -243,9 +250,11 @@ export function buildCityFromDistrict(district: District): City {
   }
 
   // ── junction sizes: room for the widest crossing road ──
+  const degreeOf = new Map<number, number>();
   for (const node of city.nodes) {
     const segs = [...node.in, ...node.out];
     const degree = new Set(segs.map((s) => info[s]!.edge.id)).size;
+    degreeOf.set(node.id, degree);
     let r = 0;
     if (!node.boundary && degree >= 3) {
       r = radius.get(node.id)! + Math.max(...segs.map((s) => halfWidthOf(info[s]!.edge))) + 1.5;
@@ -257,6 +266,24 @@ export function buildCityFromDistrict(district: District): City {
     const first = city.segments[segs[0] ?? 0];
     if (first) node.vStreet = node.hStreet = first.street;
   }
+
+  // ── traffic signals: an OSM signal node belongs to the nearest junction within reach ──
+  const junctions = city.nodes.filter((n) => !n.boundary && degreeOf.get(n.id)! >= 3);
+  const lit = new Set<number>();
+  for (const n of roads.nodes) {
+    if (!n.signals) continue;
+    let best: CityNode | null = null;
+    let bestGap = Infinity;
+    for (const j of junctions) {
+      const gap = dist(n, j) - j.halfX;
+      if (gap < bestGap) {
+        bestGap = gap;
+        best = j;
+      }
+    }
+    if (best && bestGap <= SIGNAL_REACH) lit.add(best.id);
+  }
+  for (const id of lit) planSignal(city, city.nodes[id]!);
 
   // ── roads cut by the frame right next to a junction get a stub outside the frame ──
   for (const seg of city.segments) {
@@ -388,6 +415,28 @@ function largestCarScc(city: City): number[] {
   return largestStronglyConnected(adj);
 }
 
+// ───────────────────────────── signals ─────────────────────────────
+
+/**
+ * Phases from approach directions: opposite approaches (and parallel carriageways) move together.
+ * The phase carrying the highest-ranked road gets the long green; offsets are spread by node id.
+ */
+function planSignal(city: City, node: CityNode) {
+  const approaches = node.in.map((s) => city.segments[s]!);
+  const groups: Segment[][] = [];
+  for (const a of approaches) {
+    const g = groups.find((list) => list.every((b) => Math.abs(dot(a.dirOut, b.dirOut)) > PHASE_ALIGN));
+    if (g) g.push(a);
+    else groups.push([a]);
+  }
+  if (groups.length < 2) return;
+  groups.forEach((g, i) => g.forEach((s) => (s.phase = i)));
+  const top = Math.max(...approaches.map((s) => s.rank));
+  const phases = groups.map((g) => ({ green: g.some((s) => s.rank === top) ? GREEN_MAIN : GREEN_SIDE }));
+  const cycle = cycleOf({ phases, offset: 0 });
+  node.signal = { phases, offset: (node.id * 7919) % cycle };
+}
+
 // ───────────────────────────── graph simplification ─────────────────────────────
 
 function incidence(edges: Map<number, WorkEdge>) {
@@ -512,7 +561,8 @@ function trimToJunctions(line: Polyline, from: CityNode, to: CityNode): Polyline
   const L = line.length;
   let s0 = exitArc(line, from, from.halfX, true);
   let s1 = exitArc(line, to, to.halfX, false);
-  const minLen = Math.min(2.5, L * 0.6);
+  // Junction circles may overlap on short roads: keep at least 2.5 m of lane (or the whole road).
+  const minLen = Math.min(2.5, L);
   if (L - s0 - s1 < minLen) {
     const f = Math.max(0, (L - minLen) / Math.max(1e-6, s0 + s1));
     s0 *= f;

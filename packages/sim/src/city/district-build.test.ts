@@ -78,6 +78,18 @@ describe('buildCityFromDistrict on small districts', () => {
     expect(turns.filter((t) => t === 'R')).toHaveLength(4);
   });
 
+  it('puts opposite approaches of a signalled crossing into one phase', () => {
+    const d = plus();
+    d.roads.nodes[0]!.signals = true;
+    const city = buildCityFromDistrict(d);
+    const centre = city.nodes.find((n) => n.in.length === 4)!;
+    expect(centre.signal!.phases).toHaveLength(2);
+    const phaseOf = (from: [number, number]) => segOf(city, from, [0, 0]).phase;
+    expect(phaseOf([-100, 0])).toBe(phaseOf([100, 0]));
+    expect(phaseOf([0, -100])).toBe(phaseOf([0, 100]));
+    expect(phaseOf([-100, 0])).not.toBe(phaseOf([0, -100]));
+  });
+
   it('honours turn restrictions', () => {
     // Edge 0 runs west→centre, edge 2 runs north→centre (from (0,-100)).
     const city = buildCityFromDistrict(plus([{ from: 0, via: 0, to: 2, only: false }]));
@@ -178,6 +190,21 @@ describe('buildCityFromDistrict on Belgrade', () => {
         if (city.streets[o.street]!.name !== 'Trg Slavija') expect(o.rank).toBeLessThan(s.rank);
       }
     }
+  });
+
+  it('signals the junctions OSM marks with traffic lights, with a phase for every approach', () => {
+    const signalled = city.nodes.filter((n) => n.signal);
+    expect(signalled.length).toBeGreaterThanOrEqual(100);
+    expect(signalled.length).toBeLessThanOrEqual(220);
+    for (const node of signalled) {
+      const phases = node.signal!.phases.length;
+      expect(phases).toBeGreaterThanOrEqual(2);
+      for (const s of node.in) expect(city.segments[s]!.phase).toBeLessThan(phases);
+      for (const p of node.signal!.phases) expect([30, 45]).toContain(p.green);
+      // Every phase has at least one approach.
+      for (let i = 0; i < phases; i++) expect(node.in.some((s) => city.segments[s]!.phase === i)).toBe(true);
+    }
+    for (const c of city.connectors) expect(c.phase).toBe(city.segments[city.lanes[c.from]!.seg]!.phase);
   });
 
   it('keeps most of the network in the core that never needs the outside world', () => {
