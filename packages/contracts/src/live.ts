@@ -7,8 +7,8 @@ import type { FleetStatus, LightAspect, LightMode, OrderStatus, TaxiActivity, Ve
  */
 export type VehicleTuple = [string, number, number, number, number, number, number, number];
 
-/** One aspect pair per intersection: [northSouthAspectIndex, eastWestAspectIndex, secondsLeft]. */
-export type LightTuple = [number, number, number];
+/** Per signalised intersection: [nsAspectIndex, ewAspectIndex, nsSecondsLeft, ewSecondsLeft] (-1 = held). */
+export type LightTuple = [number, number, number, number];
 
 export interface LiveFrame {
   /** Simulation clock in seconds. */
