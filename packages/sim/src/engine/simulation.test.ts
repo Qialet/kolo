@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { buildCity } from '../city/build.js';
+import { readFileSync } from 'node:fs';
+import type { District } from '../city/district.js';
+import { buildCityFromDistrict } from '../city/district-build.js';
 import { Simulation, type FleetVehicleSeed } from './simulation.js';
 
 function fleet(n: number): FleetVehicleSeed[] {
@@ -14,6 +16,9 @@ function fleet(n: number): FleetVehicleSeed[] {
     driverRating: 4.8,
   }));
 }
+
+const REAL = new URL('../../../../data/districts/belgrade-center.json', import.meta.url);
+const buildCity = () => buildCityFromDistrict(JSON.parse(readFileSync(REAL, 'utf8')) as District);
 
 describe('Simulation', () => {
   it('runs ten minutes of city life without collisions, NaNs or gridlock', () => {

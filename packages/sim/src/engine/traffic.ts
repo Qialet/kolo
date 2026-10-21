@@ -1,5 +1,5 @@
 import type { LightMode, VehicleKind } from '@kolo/contracts';
-import { lanePoint } from '../city/build.js';
+import { lanePoint } from '../city/lanes.js';
 import type { City, Connector, CurbRef, Lane, Segment } from '../city/types.js';
 import { dist, dot, polyline, poseAlong, poseAt, type Polyline, type Pose, type Vec2 } from '../geometry.js';
 import type { Rng } from '../rng.js';

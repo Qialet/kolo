@@ -1,20 +1,15 @@
 import type { Polyline, Rect, Vec2 } from '../geometry.js';
+import type { AreaKind, BuildingUse, PoiKind } from './district.js';
 
-export type Axis = 'NS' | 'EW';
 export type StreetClass = 'boulevard' | 'local';
 export type Turn = 'S' | 'L' | 'R';
 
 export interface Street {
   id: number;
   name: string;
-  /** NS streets run north–south at a fixed x; EW streets run east–west at a fixed z. */
-  axis: Axis;
-  coord: number;
   cls: StreetClass;
   lanesPerDir: number;
   laneWidth: number;
-  /** Half width of the central median (0 for local streets). */
-  median: number;
   halfWidth: number;
   /** Speed limit in m/s. */
   speed: number;
@@ -33,15 +28,10 @@ export interface SignalPlan {
 
 export interface CityNode {
   id: number;
-  col: number;
-  row: number;
   x: number;
   z: number;
-  vStreet: number;
-  hStreet: number;
-  /** Half extent of the junction box along x / z. */
-  halfX: number;
-  halfZ: number;
+  /** Radius of the junction area: lanes end where they leave this circle. */
+  radius: number;
   in: number[];
   out: number[];
   signal: SignalPlan | null;
@@ -55,8 +45,6 @@ export interface Segment {
   from: number;
   to: number;
   street: number;
-  /** Procedural grid only (renderer); the engine never reads it. */
-  axis: Axis;
   /** Unit travel direction where the segment leaves its start node / enters its end node. */
   dirIn: Vec2;
   dirOut: Vec2;
@@ -106,21 +94,36 @@ export interface Connector {
   conflicts: number[];
 }
 
-export type BuildingKind = 'residential' | 'office' | 'poi' | 'garage' | 'depot-office' | 'stall' | 'kiosk' | 'shed' | 'outbuilding';
+export type BuildingKind = BuildingUse | 'garage' | 'depot-office';
 
 export interface Building {
   id: string;
+  outline: Vec2[];
+  holes: Vec2[][];
+  /** Area centroid. */
   x: number;
   z: number;
-  /** Size along x / z. */
-  w: number;
-  d: number;
   h: number;
+  levels: number;
   kind: BuildingKind;
   tint: number;
   addressId: string | null;
   name: string | null;
-  blockId: number;
+}
+
+/** Land cover polygon (water, parks, plazas …). */
+export interface Area {
+  kind: AreaKind;
+  outer: Vec2[];
+  holes: Vec2[][];
+}
+
+/** Asphalt of one road between junctions: its OSM centre line and the paved width on each side. */
+export interface RoadStrip {
+  points: Vec2[];
+  /** Metres to the left / right of the line in its point order. */
+  left: number;
+  right: number;
 }
 
 export interface Tree {
@@ -130,13 +133,15 @@ export interface Tree {
   h: number;
 }
 
-/** Courtyard playground: a soft pad with a sandbox, swings and a climbing frame. */
+/** Playground: a soft pad with a sandbox, swings and a climbing frame. */
 export interface Playground {
   x: number;
   z: number;
-  /** Size along x / z. */
+  /** Pad size along its own axes before rotation. */
   w: number;
   d: number;
+  /** three.js rotation around Y that turns the pad's local x axis onto its long side. */
+  rot: number;
   /** Equipment arrangement (0..2). */
   variant: number;
 }
@@ -159,7 +164,7 @@ export interface Address extends CurbRef {
   id: string;
   label: string;
   street: number;
-  number: number;
+  number: string;
   /** Entrance on the sidewalk. */
   x: number;
   z: number;
@@ -176,9 +181,10 @@ export interface Slot {
 export interface Depot {
   id: string;
   name: string;
-  blockId: number;
-  lot: Rect;
-  garage: Rect;
+  /** Real lot outline. */
+  lot: Vec2[];
+  /** Service garage footprint (four corners). */
+  garage: Vec2[];
   gate: Vec2;
   /** Inside the lot, just behind the gate. */
   yard: Vec2;
@@ -205,38 +211,31 @@ export interface BusLine {
   stops: string[];
 }
 
-export type BlockKind = 'urban' | 'park' | 'depot' | 'poi' | 'market' | 'edge';
-
-export interface Block {
-  id: number;
-  kind: BlockKind;
-  /** Usable area inside sidewalks. */
-  inner: Rect;
-  name: string | null;
-}
-
 export interface Poi {
   id: string;
   name: string;
-  kind: 'mall' | 'hospital' | 'station' | 'market' | 'university' | 'hotel' | 'park';
+  kind: PoiKind;
   addressId: string;
   weight: number;
+  /** Label anchor (the place itself, not its curb). */
+  x: number;
+  z: number;
 }
 
 export interface City {
-  seed: number;
+  districtId: string;
+  /** District file version (content hash). */
+  version: string;
   bounds: Rect;
-  sidewalk: number;
   streets: Street[];
   nodes: CityNode[];
   segments: Segment[];
   lanes: Lane[];
   connectors: Connector[];
-  blocks: Block[];
+  roads: RoadStrip[];
+  areas: Area[];
   buildings: Building[];
   trees: Tree[];
-  /** Courtyard lawns (raised green patches). */
-  lawns: Rect[];
   playgrounds: Playground[];
   parkedCars: ParkedCar[];
   addresses: Address[];

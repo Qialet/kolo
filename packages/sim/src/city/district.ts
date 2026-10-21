@@ -66,6 +66,8 @@ export interface DistrictPoi {
   x: number;
   z: number;
   building?: string;
+  /** Flat x, z outline of an area POI (simplified), for places whose arrival point is far from the core. */
+  outline?: number[];
 }
 
 /** A real lot chosen for a partner depot; the yard is laid out by packages/sim. */

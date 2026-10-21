@@ -144,3 +144,45 @@ export function pointInRing(p: Vec2, ring: Vec2[]): boolean {
 export function pointInPolygon(p: Vec2, outer: Vec2[], holes: Vec2[][]): boolean {
   return pointInRing(p, outer) && !holes.some((h) => pointInRing(p, h));
 }
+
+export interface OrientedRect {
+  center: Vec2;
+  /** Unit direction of the long side. */
+  u: Vec2;
+  /** Long and short side lengths. */
+  len: number;
+  wid: number;
+}
+
+/** Minimum-area bounding rectangle (one side is always collinear with an edge of the ring). */
+export function minAreaRect(ring: Vec2[]): OrientedRect {
+  let best: (OrientedRect & { area: number }) | null = null;
+  for (let i = 0; i < ring.length; i++) {
+    const a = ring[i]!;
+    const b = ring[(i + 1) % ring.length]!;
+    const l = Math.hypot(b.x - a.x, b.z - a.z);
+    if (l < 1e-6) continue;
+    const u = { x: (b.x - a.x) / l, z: (b.z - a.z) / l };
+    let s0 = Infinity;
+    let s1 = -Infinity;
+    let t0 = Infinity;
+    let t1 = -Infinity;
+    for (const p of ring) {
+      const s = p.x * u.x + p.z * u.z;
+      const t = -p.x * u.z + p.z * u.x;
+      s0 = Math.min(s0, s);
+      s1 = Math.max(s1, s);
+      t0 = Math.min(t0, t);
+      t1 = Math.max(t1, t);
+    }
+    const area = (s1 - s0) * (t1 - t0);
+    if (best && area >= best.area - 1e-9) continue;
+    const sm = (s0 + s1) / 2;
+    const tm = (t0 + t1) / 2;
+    const center = { x: u.x * sm - u.z * tm, z: u.z * sm + u.x * tm };
+    best = s1 - s0 >= t1 - t0 ? { center, u, len: s1 - s0, wid: t1 - t0, area } : { center, u: { x: -u.z, z: u.x }, len: t1 - t0, wid: s1 - s0, area };
+  }
+  if (!best) return { center: ring[0] ?? { x: 0, z: 0 }, u: { x: 1, z: 0 }, len: 0, wid: 0 };
+  const { area: _area, ...rect } = best;
+  return rect;
+}

@@ -30,6 +30,12 @@ function district(nodes: [number, number, Partial<RoadNode>?][], edges: [number,
       }),
       restrictions,
     },
+    buildings: [],
+    areas: [],
+    trees: [],
+    addresses: [],
+    pois: [],
+    depotSites: [],
   };
 }
 

@@ -12,7 +12,7 @@
 - Координаты: x — восток, z — юг, метры, опорная точка Славии; рамка BELGRADE_BBOX без изменений; точность 0,1 м.
 - Строки UI на русском, названия улиц и мест латиницей (name:sr-Latn, иначе toLatin).
 - На карте атрибуция «© OpenStreetMap contributors».
-- Решения пользователя: депо P1 Avala Fleet — OSM way 527970079 (Hercegovačka), P2 Sava Motors — 1330291576 (Sarajevska), P3 Dunav Taxi — 1191458362 (Dobračina); резерв — 394469286, 741151667. Флот 60 такси (24/18/18), фоновых машин до 300.
+- Решения пользователя: депо P1 Avala Fleet — OSM way 527970079 (Hercegovačka), P2 Sava Motors — 393230621 (parking «Slavija 1»; двор на Sarajevskoj закрыт домами), P3 Dunav Taxi — 1191458362 (Dobračina); резерв — 394469286, 741151667. Флот 60 такси (24/18/18), фоновых машин до 300.
 - Автобусов до плана 3 нет: busStops и busLines пустые, всё, что их читает, должно это пережить.
 - pnpm test, pnpm build и pnpm lint (web) зелёные после каждой задачи; коммиты conventional; после задачи — чекбоксы ROADMAP.
 

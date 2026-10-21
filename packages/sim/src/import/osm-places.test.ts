@@ -109,6 +109,7 @@ describe('importPlaces', () => {
     expect(pois).toHaveLength(1);
     expect(pois[0]).toMatchObject({ name: 'Pionirski park', kind: 'park', weight: 1 });
     expect(pois[0]!.z).toBeCloseTo(40, 0);
+    expect(pois[0]!.outline).toHaveLength(8);
   });
 });
 

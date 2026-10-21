@@ -22,7 +22,7 @@ import {
   type TaxiActivity,
   type TaxiDetail,
 } from '@kolo/contracts';
-import { lanePoint } from '../city/build.js';
+import { lanePoint } from '../city/lanes.js';
 import type { BusLine, City, CurbRef, Depot, Slot } from '../city/types.js';
 import { dist, type Vec2 } from '../geometry.js';
 import { createRng, type Rng } from '../rng.js';

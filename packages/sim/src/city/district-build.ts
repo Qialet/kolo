@@ -19,8 +19,9 @@ import { turnBetween } from '../engine/routing.js';
 import { cycleOf } from '../engine/signals.js';
 import { largestStronglyConnected } from '../graph.js';
 import type { District, RoadClass, RoadEdge } from './district.js';
-import { SIDEWALK } from './layout.js';
-import type { City, CityNode, Connector, Lane, Segment, Street, Turn } from './types.js';
+import { layoutDepots } from './depots.js';
+import { addPlaces, parkCars } from './places.js';
+import type { City, CityNode, Connector, Lane, RoadStrip, Segment, Street, Turn } from './types.js';
 
 /** Junction nodes joined by roads shorter than this become one junction (dual carriageways). */
 const CLUSTER_EDGE = 18;
@@ -50,7 +51,7 @@ const RANK: Record<RoadClass, number> = {
   living_street: 1,
 };
 const RING_BONUS = 10;
-const laneWidthOf = (cls: RoadClass) => (cls === 'residential' || cls === 'living_street' ? 3.0 : 3.2);
+export const laneWidthOf = (cls: RoadClass) => (cls === 'residential' || cls === 'living_street' ? 3.0 : 3.2);
 
 /** A road between two graph nodes while the graph is being simplified. */
 interface WorkEdge {
@@ -67,7 +68,7 @@ interface WorkEdge {
   merged: number[];
 }
 
-/** Builds the road network of a City from a district file (buildings and places come later). */
+/** Builds a City from a district file: the road graph, then buildings, places and partner depots. */
 export function buildCityFromDistrict(district: District): City {
   const { roads } = district;
   const nodePos = new Map(roads.nodes.map((n) => [n.id, { x: n.x, z: n.z }]));
@@ -119,18 +120,18 @@ export function buildCityFromDistrict(district: District): City {
 
   // ── city skeleton ──
   const city: City = {
-    seed: 0,
+    districtId: district.meta.id,
+    version: district.meta.version,
     bounds: { ...district.meta.bounds },
-    sidewalk: SIDEWALK,
     streets: [],
     nodes: [],
     segments: [],
     lanes: [],
     connectors: [],
-    blocks: [],
+    roads: [],
+    areas: [],
     buildings: [],
     trees: [],
-    lawns: [],
     playgrounds: [],
     parkedCars: [],
     addresses: [],
@@ -149,14 +150,9 @@ export function buildCityFromDistrict(district: District): City {
     const c = centroid(members.map((m) => nodePos.get(m)!));
     const node: CityNode = {
       id: city.nodes.length,
-      col: 0,
-      row: 0,
       x: round2(c.x),
       z: round2(c.z),
-      vStreet: 0,
-      hStreet: 0,
-      halfX: 0,
-      halfZ: 0,
+      radius: 0,
       in: [],
       out: [],
       signal: null,
@@ -176,16 +172,12 @@ export function buildCityFromDistrict(district: District): City {
     const w = laneWidthOf(e.src.cls);
     const half = halfWidthOf(e);
     if (!s) {
-      const d = sub(e.pts[e.pts.length - 1]!, e.pts[0]!);
       s = {
         id: city.streets.length,
         name: e.src.name,
-        axis: Math.abs(d.x) > Math.abs(d.z) ? 'EW' : 'NS',
-        coord: 0,
         cls: RANK[e.src.cls] >= RANK.secondary ? 'boulevard' : 'local',
         lanesPerDir: Math.max(e.lanesFwd, e.lanesBwd),
         laneWidth: w,
-        median: 0,
         halfWidth: half,
         speed: e.src.speed,
       };
@@ -227,7 +219,6 @@ export function buildCityFromDistrict(district: District): City {
         from: from.id,
         to: to.id,
         street: street.id,
-        axis: street.axis,
         dirIn: chordTangent(base, true),
         dirOut: chordTangent(base, false),
         lanes: [],
@@ -263,12 +254,9 @@ export function buildCityFromDistrict(district: District): City {
     if (!node.boundary && degree >= 3) {
       r = radius.get(node.id)! + Math.max(...segs.map((s) => halfWidthOf(info[s]!.edge))) + 1.5;
     } else if (!node.boundary && degree === 2) r = 1.5;
-    r = Math.min(r, CLUSTER_RADIUS);
-    node.halfX = node.halfZ = r;
+    node.radius = Math.min(r, CLUSTER_RADIUS);
     const names = [...new Set(segs.map((s) => city.streets[city.segments[s]!.street]!.name).filter(Boolean))];
     node.name = names.slice(0, 3).join(' × ') || 'Raskrsnica';
-    const first = city.segments[segs[0] ?? 0];
-    if (first) node.vStreet = node.hStreet = first.street;
   }
 
   // ── traffic signals: an OSM signal node belongs to the nearest junction within reach ──
@@ -279,7 +267,7 @@ export function buildCityFromDistrict(district: District): City {
     let best: CityNode | null = null;
     let bestGap = Infinity;
     for (const j of junctions) {
-      const gap = dist(n, j) - j.halfX;
+      const gap = dist(n, j) - j.radius;
       if (gap < bestGap) {
         bestGap = gap;
         best = j;
@@ -294,7 +282,7 @@ export function buildCityFromDistrict(district: District): City {
     const si = info[seg.id]!;
     const from = city.nodes[seg.from]!;
     const to = city.nodes[seg.to]!;
-    const room = Math.max(from.halfX, to.halfX) + 6;
+    const room = Math.max(from.radius, to.radius) + 6;
     if (!(from.boundary || to.boundary) || si.base.length >= room) continue;
     const pts = [...si.base.points];
     const extra = room - si.base.length;
@@ -404,7 +392,19 @@ export function buildCityFromDistrict(district: District): City {
   }
   void signalPoints;
   for (const id of largestCarScc(city)) city.segments[id]!.core = true;
+  for (const e of edges.values()) city.roads.push(roadStrip(e));
+  addPlaces(city, district);
+  layoutDepots(city, district.depotSites);
+  parkCars(city);
   return city;
+}
+
+/** Paved width around the OSM centre line: two-way lanes sit right and left of it, one-way lanes centred. */
+function roadStrip(e: WorkEdge): RoadStrip {
+  const w = laneWidthOf(e.src.cls);
+  const twoWay = e.lanesFwd > 0 && e.lanesBwd > 0;
+  const half = ((e.lanesFwd + e.lanesBwd) * w) / 2;
+  return { points: e.pts, left: twoWay ? e.lanesBwd * w : half, right: twoWay ? e.lanesFwd * w : half };
 }
 
 /** Largest set of segments that cars can drive between in both directions without leaving the map. */
@@ -563,8 +563,8 @@ export function offsetPoints(points: Vec2[], d: number): Vec2[] {
 /** Cuts a lane centre line where it leaves the start junction and enters the end junction. */
 function trimToJunctions(line: Polyline, from: CityNode, to: CityNode): Polyline {
   const L = line.length;
-  let s0 = exitArc(line, from, from.halfX, true);
-  let s1 = exitArc(line, to, to.halfX, false);
+  let s0 = exitArc(line, from, from.radius, true);
+  let s1 = exitArc(line, to, to.radius, false);
   // Junction circles may overlap on short roads: keep at least 2.5 m of lane (or the whole road).
   const minLen = Math.min(2.5, L);
   if (L - s0 - s1 < minLen) {

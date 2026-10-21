@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { clipRing, joinRings, pointInPolygon, polygonCentroid, ringArea, simplifyRing } from './polygons.js';
+import { clipRing, joinRings, minAreaRect, pointInPolygon, polygonCentroid, ringArea, simplifyRing } from './polygons.js';
 
 const square = (x0: number, z0: number, s: number) => [
   { x: x0, z: z0 },
@@ -49,5 +49,18 @@ describe('polygons', () => {
     const c = polygonCentroid([{ x: 0, z: 0 }, { x: 10, z: 0 }, { x: 10, z: 1 }, { x: 1, z: 1 }, { x: 1, z: 10 }, { x: 0, z: 10 }]);
     expect(c.x).toBeCloseTo(c.z, 6);
     expect(c.x).toBeLessThan(5);
+  });
+
+  it('finds the oriented bounding box of a rotated rectangle', () => {
+    const a = Math.PI / 6;
+    const u = { x: Math.cos(a), z: Math.sin(a) };
+    const n = { x: -u.z, z: u.x };
+    const at = (s: number, t: number) => ({ x: 100 + u.x * s + n.x * t, z: 50 + u.z * s + n.z * t });
+    const box = minAreaRect([at(-20, -10), at(20, -10), at(20, 10), at(-20, 10)]);
+    expect(box.len).toBeCloseTo(40, 6);
+    expect(box.wid).toBeCloseTo(20, 6);
+    expect(box.center.x).toBeCloseTo(100, 6);
+    expect(box.center.z).toBeCloseTo(50, 6);
+    expect(Math.abs(box.u.x * u.x + box.u.z * u.z)).toBeCloseTo(1, 6);
   });
 });

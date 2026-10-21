@@ -28,7 +28,7 @@ export interface DepotSiteSpec {
 /** Partner depots on real surface car parks next to the core network (chosen with the user). */
 export const DEPOT_SITES: DepotSiteSpec[] = [
   { id: 'P1', name: 'Avala Fleet', osm: 527970079 },
-  { id: 'P2', name: 'Sava Motors', osm: 1330291576 },
+  { id: 'P2', name: 'Sava Motors', osm: 393230621 },
   { id: 'P3', name: 'Dunav Taxi', osm: 1191458362 },
 ];
 
@@ -40,6 +40,7 @@ const MIN_BUILDING = 4;
 const MIN_AREA = 20;
 const TREE_ROW_STEP = 9;
 const BIG_PARK = 30_000;
+const POI_SIMPLIFY = 2;
 
 const USE: Record<string, BuildingUse> = {
   apartments: 'residential',
@@ -273,16 +274,19 @@ export function importPlaces(elements: OsmElement[], bbox: BBoxDeg, roads: Distr
     if (!t || !kind) continue;
     let p: Vec2 | undefined;
     let size = 0;
+    let outline: number[] | undefined;
     if (e.type === 'node') p = pos(e.id);
     else {
       const shape = shapesOf(e)[0];
       if (!shape) continue;
       size = areaSize.get(e) ?? ringArea(shape.outer);
+      outline = flat(simplifyRing(shape.outer, POI_SIMPLIFY));
       p = roads.edges.length ? shape.outer.reduce((best, q) => (roadAt(q) < roadAt(best) ? q : best)) : polygonCentroid(shape.outer);
     }
     if (!p || !pointInRect(p, bounds)) continue;
     const poi: DistrictPoi = { id: idOf(e), name: latin(t, 'name'), kind, weight: POI_WEIGHT[kind], x: round1(p.x), z: round1(p.z) };
     if (kind === 'park' && size > BIG_PARK) poi.weight = 2;
+    if (outline) poi.outline = outline;
     const own = t.building && shapeOfBuilding.has(idOf(e)) ? idOf(e) : buildingAt(p);
     if (own) poi.building = own;
     const key = `${kind}|${poi.name}`;
