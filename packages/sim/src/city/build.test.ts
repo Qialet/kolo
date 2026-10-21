@@ -70,6 +70,35 @@ describe('buildCity', () => {
     }
   });
 
+  it('parks cars on local sidewalks clear of entrances, stops and pulled-over taxis', () => {
+    expect(city.parkedCars.length).toBeGreaterThan(300);
+    // Rendered footprint (×1.15) of a parked car, as a circle-ish radius test along and across.
+    const halfLen = 2.55;
+    const halfWid = 1.05;
+    const problems: string[] = [];
+    for (const car of city.parkedCars) {
+      const dir = { x: Math.sin(car.heading), z: Math.cos(car.heading) };
+      for (const b of city.buildings) {
+        const dx = Math.max(0, Math.abs(car.x - b.x) - b.w / 2);
+        const dz = Math.max(0, Math.abs(car.z - b.z) - b.d / 2);
+        // Footprint is axis-aligned because streets are; the across half-width is the tighter one.
+        const across = Math.abs(dir.x) > 0.5 ? dz : dx;
+        const along = Math.abs(dir.x) > 0.5 ? dx : dz;
+        if (across < halfWid - 0.05 && along < halfLen) problems.push(`car at ${car.x},${car.z} hits ${b.id}`);
+      }
+      for (const a of city.addresses) if (Math.hypot(a.x - car.x, a.z - car.z) < 2.5) problems.push(`car blocks entrance ${a.id}`);
+      for (const st of city.busStops) if (Math.hypot(st.x - car.x, st.z - car.z) < 8) problems.push(`car at stop ${st.id}`);
+    }
+    // A taxi pulled over at the kerb (lane offset + 2.5 m, rendered half-width 1.05 m) never touches a parked car.
+    for (const car of city.parkedCars) {
+      const nearest = city.streets.find((s) => s.cls === 'local' && Math.abs((s.axis === 'NS' ? car.x : car.z) - s.coord) < 10)!;
+      const fromCentre = Math.abs((nearest.axis === 'NS' ? car.x : car.z) - nearest.coord);
+      const pulledEdge = nearest.laneWidth / 2 + 2.5 + 1.05;
+      if (fromCentre - halfWid <= pulledEdge) problems.push(`car at ${car.x},${car.z} is in the pull-over strip`);
+    }
+    expect(problems).toEqual([]);
+  });
+
   it('builds bus loops with stops on curb lanes', () => {
     expect(city.busLines).toHaveLength(3);
     for (const line of city.busLines) {

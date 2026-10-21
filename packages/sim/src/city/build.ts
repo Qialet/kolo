@@ -103,6 +103,7 @@ export function buildCity(seed = DEFAULT_CITY_SEED): City {
     trees: [],
     lawns: [],
     playgrounds: [],
+    parkedCars: [],
     addresses: [],
     depots: [],
     busStops: [],
@@ -122,6 +123,7 @@ export function buildCity(seed = DEFAULT_CITY_SEED): City {
   buildBusLines(b);
   buildStreetTrees(b);
   numberAddresses(b);
+  buildParkedCars(b);
   for (const a of city.addresses) city.addressById.set(a.id, a);
   return city;
 }
@@ -880,6 +882,46 @@ function buildStreetTrees(b: Builder) {
           city.trees.push({ x: p.x, z: p.z, r: rng.range(2.2, 3), h: rng.range(6.5, 8.5) });
         }
       }
+    }
+  }
+}
+
+/** Rendered car body (4.4 m at the renderer's 1.15 scale) plus a gap between bumpers. */
+const PARK_PITCH = 6.1;
+/** Car centre measured from the kerb into the sidewalk: clear of taxis pulled over at the kerb. */
+const PARK_INTO_SIDEWALK = 2.75;
+
+/**
+ * Vračar-style parking on the sidewalks of local streets. Cars never stand where vehicles pull
+ * over or cross the sidewalk: entrances, bus stops, depot gates and junction corners stay free.
+ */
+function buildParkedCars(b: Builder) {
+  const { city } = b;
+  const rng = createRng(city.seed * 104729 + 17);
+  const blocked = new Map<number, [number, number][]>();
+  const block = (lane: number, s0: number, s1: number) => {
+    const list = blocked.get(lane) ?? [];
+    list.push([s0, s1]);
+    blocked.set(lane, list);
+  };
+  for (const a of city.addresses) block(a.lane, a.s - 3.4, a.s + 3.4);
+  for (const st of city.busStops) block(st.lane, st.s - 22, st.s + 9);
+  for (const d of city.depots) block(d.curb.lane, d.curb.s - 11, d.curb.s + 11);
+
+  for (const seg of city.segments) {
+    const street = city.streets[seg.street]!;
+    if (street.cls !== 'local') continue;
+    const lane = city.lanes[seg.lanes[seg.lanes.length - 1]!]!;
+    const spans = blocked.get(lane.id) ?? [];
+    // Some streets are packed, some half empty.
+    const fill = rng.range(0.35, 0.85);
+    const lateral = street.halfWidth - lane.offset + PARK_INTO_SIDEWALK;
+    for (let s = 7 + PARK_PITCH / 2; s < lane.length - 9 - PARK_PITCH / 2; s += PARK_PITCH) {
+      const half = PARK_PITCH / 2;
+      if (spans.some(([s0, s1]) => s + half > s0 && s - half < s1)) continue;
+      if (!rng.chance(fill)) continue;
+      const p = lanePoint(city, lane.id, s + rng.range(-0.3, 0.3), lateral);
+      city.parkedCars.push({ x: p.x, z: p.z, heading: headingOf(lane.dir), tint: rng.int(0, 6) });
     }
   }
 }

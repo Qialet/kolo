@@ -121,6 +121,15 @@ export interface Playground {
   variant: number;
 }
 
+/** A car parked on the sidewalk of a local street (static decoration, outside the traffic model). */
+export interface ParkedCar {
+  x: number;
+  z: number;
+  heading: number;
+  /** Index into the renderer's neutral car palette. */
+  tint: number;
+}
+
 export interface CurbRef {
   lane: number;
   s: number;
@@ -209,6 +218,7 @@ export interface City {
   /** Courtyard lawns (raised green patches). */
   lawns: Rect[];
   playgrounds: Playground[];
+  parkedCars: ParkedCar[];
   addresses: Address[];
   depots: Depot[];
   busStops: BusStop[];

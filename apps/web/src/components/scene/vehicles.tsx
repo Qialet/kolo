@@ -2,7 +2,8 @@
 
 import { useFrame, type ThreeEvent } from '@react-three/fiber';
 import { TAXI_ACTIVITIES } from '@kolo/contracts';
-import { useMemo, useRef } from 'react';
+import type { City } from '@kolo/sim';
+import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
@@ -24,6 +25,8 @@ const TAIL_OFF = new THREE.Color('#7A2530');
 const SIGN_FREE = new THREE.Color(palette.green);
 const SIGN_PICKUP = new THREE.Color(palette.amber);
 const SIGN_OFF = new THREE.Color('#4A4F5A');
+/** Parked cars are mixed slightly towards the sidewalk tone so moving traffic reads first. */
+const PARKED_DUST = new THREE.Color(palette.sidewalk);
 const FREE = TAXI_ACTIVITIES.indexOf('FREE');
 const TO_PICKUP = TAXI_ACTIVITIES.indexOf('TO_PICKUP');
 const AT_PICKUP = TAXI_ACTIVITIES.indexOf('AT_PICKUP');
@@ -214,6 +217,53 @@ export function Vehicles() {
       </instancedMesh>
       <instancedMesh ref={bind('busTails')} args={[g.busTails, undefined, MAX.bus]} frustumCulled={false} instanceColor={withColors(MAX.bus, '#7A2530')}>
         <meshBasicMaterial toneMapped={false} />
+      </instancedMesh>
+    </group>
+  );
+}
+
+/** Cars parked on local sidewalks: static, muted, not interactive. */
+export function ParkedCars({ city }: { city: City }) {
+  const g = useMemo(
+    () => ({
+      body: box(1.82, 0.66, 4.4, 0, 0.66, 0, 0.2),
+      cabin: box(1.52, 0.5, 2.1, 0, 1.18, -0.25, 0.18),
+      wheels: wheels(0.84, [-1.35, 1.35], 0.33),
+    }),
+    [],
+  );
+  const body = useRef<THREE.InstancedMesh>(null);
+  const cabin = useRef<THREE.InstancedMesh>(null);
+  const wheel = useRef<THREE.InstancedMesh>(null);
+  useEffect(() => {
+    const colors = palette.cars.map((x) => new THREE.Color(x).lerp(PARKED_DUST, 0.25));
+    city.parkedCars.forEach((car, i) => {
+      // Sidewalk level, same 15% upscale as moving vehicles.
+      tmp.position.set(car.x, 0.17, car.z);
+      tmp.rotation.set(0, car.heading, 0);
+      tmp.scale.setScalar(1.15);
+      tmp.updateMatrix();
+      for (const m of [body.current, cabin.current, wheel.current]) m?.setMatrixAt(i, tmp.matrix);
+      body.current?.setColorAt(i, colors[car.tint % colors.length]!);
+    });
+    for (const m of [body.current, cabin.current, wheel.current]) {
+      if (!m) continue;
+      m.instanceMatrix.needsUpdate = true;
+      if (m.instanceColor) m.instanceColor.needsUpdate = true;
+      m.computeBoundingSphere();
+    }
+  }, [city]);
+  const n = city.parkedCars.length;
+  return (
+    <group>
+      <instancedMesh ref={body} args={[g.body, undefined, n]} castShadow receiveShadow>
+        <meshStandardMaterial roughness={0.55} />
+      </instancedMesh>
+      <instancedMesh ref={cabin} args={[g.cabin, undefined, n]}>
+        <meshStandardMaterial color={palette.glass} roughness={0.3} metalness={0.2} />
+      </instancedMesh>
+      <instancedMesh ref={wheel} args={[g.wheels, undefined, n]}>
+        <meshStandardMaterial color="#20232A" roughness={0.8} />
       </instancedMesh>
     </group>
   );
