@@ -1,6 +1,6 @@
 import { Logger, type OnModuleDestroy } from '@nestjs/common';
 import { type OnGatewayConnection, type OnGatewayInit, WebSocketGateway, WebSocketServer } from '@nestjs/websockets';
-import { SOCKET_NAMESPACE, SocketEvent } from '@kolo/contracts';
+import { SOCKET_NAMESPACE, SocketEvent, type LiveHello } from '@kolo/contracts';
 import type { Subscription } from 'rxjs';
 import type { Server, Socket } from 'socket.io';
 import { SimulationService } from '../simulation.service.js';
@@ -25,6 +25,8 @@ export class LiveGateway implements OnGatewayInit, OnGatewayConnection, OnModule
   }
 
   handleConnection(client: Socket) {
+    const hello: LiveHello = { districtId: this.simulation.city.districtId, version: this.simulation.city.version };
+    client.emit(SocketEvent.HELLO, hello);
     client.emit(SocketEvent.KPI, this.simulation.sim.kpi());
     for (const e of [...this.simulation.recentEvents].reverse()) client.emit(SocketEvent.EVENT, e);
     this.log.debug(`client ${client.id} connected`);

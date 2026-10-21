@@ -71,6 +71,9 @@ export interface ParkDto {
   address: string;
   capacity: number;
   serviceBoxes: number;
+  /** Yard gate in world metres. */
+  x: number | null;
+  z: number | null;
   counts: { total: number; onLine: number; inPark: number; maintenance: number };
 }
 

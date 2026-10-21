@@ -18,7 +18,7 @@ import type {
 } from '@prisma/orm-postgres/contract/types';
 
 export type StorageHash =
-  StorageHashBase<'77b5dc0877f7c85a2be723f83890978b3d030fd1011879e5a314a6a43c4d9bad'>;
+  StorageHashBase<'ea5738ed20458e9b28007e65980cc46dc9eef8078795646bda863a3144fd8b8e'>;
 export type ExecutionHash =
   ExecutionHashBase<'0e78640c1d401a657c8a3f7aef4a1f08cd95648dbdb989162008b7f5b7561085'>;
 export type ProfileHash =
@@ -311,6 +311,8 @@ export type FieldOutputTypes = {
       readonly name: CodecTypes['pg/text@1']['output'];
       readonly partnerId: CodecTypes['pg/text@1']['output'];
       readonly serviceBoxes: CodecTypes['pg/int4@1']['output'];
+      readonly x: CodecTypes['pg/float8@1']['output'] | null;
+      readonly z: CodecTypes['pg/float8@1']['output'] | null;
     };
     readonly Partner: {
       readonly color: CodecTypes['pg/text@1']['output'];
@@ -418,6 +420,8 @@ export type FieldInputTypes = {
       readonly name: CodecTypes['pg/text@1']['input'];
       readonly partnerId: CodecTypes['pg/text@1']['input'];
       readonly serviceBoxes: CodecTypes['pg/int4@1']['input'];
+      readonly x: CodecTypes['pg/float8@1']['input'] | null;
+      readonly z: CodecTypes['pg/float8@1']['input'] | null;
     };
     readonly Partner: {
       readonly color: CodecTypes['pg/text@1']['input'];
@@ -525,6 +529,8 @@ export type StorageColumnTypes = {
       readonly name: CodecTypes['pg/text@1']['output'];
       readonly partnerId: CodecTypes['pg/text@1']['output'];
       readonly serviceBoxes: CodecTypes['pg/int4@1']['output'];
+      readonly x: CodecTypes['pg/float8@1']['output'] | null;
+      readonly z: CodecTypes['pg/float8@1']['output'] | null;
     };
     readonly Partner: {
       readonly color: CodecTypes['pg/text@1']['output'];
@@ -632,6 +638,8 @@ export type StorageColumnInputTypes = {
       readonly name: CodecTypes['pg/text@1']['input'];
       readonly partnerId: CodecTypes['pg/text@1']['input'];
       readonly serviceBoxes: CodecTypes['pg/int4@1']['input'];
+      readonly x: CodecTypes['pg/float8@1']['input'] | null;
+      readonly z: CodecTypes['pg/float8@1']['input'] | null;
     };
     readonly Partner: {
       readonly color: CodecTypes['pg/text@1']['input'];
@@ -750,6 +758,8 @@ export namespace Models {
     name: CodecTypes['pg/text@1']['output'];
     partnerId: CodecTypes['pg/text@1']['output'];
     serviceBoxes: CodecTypes['pg/int4@1']['output'];
+    x: CodecTypes['pg/float8@1']['output'] | null;
+    z: CodecTypes['pg/float8@1']['output'] | null;
     drivers: public_Driver[];
     partner: public_Partner;
     vehicles: public_Vehicle[];
@@ -1248,6 +1258,18 @@ type ContractBase = Omit<
                   readonly dataType: 'pg/int4';
                   readonly codecId: 'pg/int4@1';
                   readonly nullable: false;
+                  readonly many: false;
+                };
+                readonly x: {
+                  readonly dataType: 'pg/float8';
+                  readonly codecId: 'pg/float8@1';
+                  readonly nullable: true;
+                  readonly many: false;
+                };
+                readonly z: {
+                  readonly dataType: 'pg/float8';
+                  readonly codecId: 'pg/float8@1';
+                  readonly nullable: true;
                   readonly many: false;
                 };
               };
@@ -1940,6 +1962,14 @@ type ContractBase = Omit<
                 readonly nullable: false;
                 readonly type: { readonly kind: 'scalar'; readonly codecId: 'pg/int4@1' };
               };
+              readonly x: {
+                readonly nullable: true;
+                readonly type: { readonly kind: 'scalar'; readonly codecId: 'pg/float8@1' };
+              };
+              readonly z: {
+                readonly nullable: true;
+                readonly type: { readonly kind: 'scalar'; readonly codecId: 'pg/float8@1' };
+              };
             };
             readonly relations: {
               readonly drivers: {
@@ -1987,6 +2017,8 @@ type ContractBase = Omit<
                 readonly name: { readonly column: 'name' };
                 readonly partnerId: { readonly column: 'partnerId' };
                 readonly serviceBoxes: { readonly column: 'serviceBoxes' };
+                readonly x: { readonly column: 'x' };
+                readonly z: { readonly column: 'z' };
               };
             };
           };

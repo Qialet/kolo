@@ -860,6 +860,20 @@
                   "codecId": "pg/int4@1",
                   "kind": "scalar"
                 }
+              },
+              "x": {
+                "nullable": true,
+                "type": {
+                  "codecId": "pg/float8@1",
+                  "kind": "scalar"
+                }
+              },
+              "z": {
+                "nullable": true,
+                "type": {
+                  "codecId": "pg/float8@1",
+                  "kind": "scalar"
+                }
               }
             },
             "relations": {
@@ -929,6 +943,12 @@
                 },
                 "serviceBoxes": {
                   "column": "serviceBoxes"
+                },
+                "x": {
+                  "column": "x"
+                },
+                "z": {
+                  "column": "z"
                 }
               },
               "namespaceId": "public",
@@ -1805,6 +1825,16 @@
                   "codecId": "pg/int4@1",
                   "dataType": "pg/int4",
                   "nullable": false
+                },
+                "x": {
+                  "codecId": "pg/float8@1",
+                  "dataType": "pg/float8",
+                  "nullable": true
+                },
+                "z": {
+                  "codecId": "pg/float8@1",
+                  "dataType": "pg/float8",
+                  "nullable": true
                 }
               },
               "foreignKeys": [
@@ -2196,7 +2226,7 @@
         "kind": "postgres-schema"
       }
     },
-    "storageHash": "77b5dc0877f7c85a2be723f83890978b3d030fd1011879e5a314a6a43c4d9bad"
+    "storageHash": "ea5738ed20458e9b28007e65980cc46dc9eef8078795646bda863a3144fd8b8e"
   },
   "execution": {
     "executionHash": "0e78640c1d401a657c8a3f7aef4a1f08cd95648dbdb989162008b7f5b7561085",

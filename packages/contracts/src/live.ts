@@ -140,7 +140,14 @@ export interface VehicleBrief {
 }
 
 export const SOCKET_NAMESPACE = '/live';
+/** Sent once on connect: which district file the server simulates. */
+export interface LiveHello {
+  districtId: string;
+  version: string;
+}
+
 export const SocketEvent = {
+  HELLO: 'hello',
   FRAME: 'frame',
   KPI: 'kpi',
   EVENT: 'event',

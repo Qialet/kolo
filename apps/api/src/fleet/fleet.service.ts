@@ -23,6 +23,8 @@ export class FleetService {
         address: p.address,
         capacity: p.capacity,
         serviceBoxes: p.serviceBoxes,
+        x: p.x,
+        z: p.z,
         counts: {
           total: mine.length,
           onLine: mine.filter((t) => t.fleetStatus === 'ON_LINE').length,

@@ -1,9 +1,10 @@
 import { Injectable, Logger, type OnApplicationBootstrap, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
 import type { Actor, FleetStatus, LiveEvent, LiveFrame, LiveKpi, OrderSummary } from '@kolo/contracts';
-import { buildCity, Simulation, type City, type FleetVehicleSeed, type SimOrderEvent } from '@kolo/sim';
+import { buildCityFromDistrict, Simulation, type City, type FleetVehicleSeed, type SimOrderEvent } from '@kolo/sim';
 import { Subject } from 'rxjs';
 import { DatabaseService } from '../database/database.service.js';
 import { SeedService } from '../database/seed/seed.service.js';
+import { loadDistrict, resolveDistrictFile } from './district.js';
 
 const TICK_MS = 50;
 const FRAME_MS = 100;
@@ -17,7 +18,8 @@ const RECENT_EVENTS = 60;
 @Injectable()
 export class SimulationService implements OnModuleInit, OnApplicationBootstrap, OnModuleDestroy {
   private readonly log = new Logger(SimulationService.name);
-  readonly city: City = buildCity();
+  readonly districtFile = resolveDistrictFile();
+  readonly city: City = buildCityFromDistrict(loadDistrict(this.districtFile));
   sim!: Simulation;
   readonly frames$ = new Subject<LiveFrame>();
   readonly kpi$ = new Subject<LiveKpi>();
@@ -71,7 +73,9 @@ export class SimulationService implements OnModuleInit, OnApplicationBootstrap, 
     });
     const open = await orm.Dispute.where({ status: 'OPEN' }).aggregate((a) => ({ n: a.count() }));
     this.sim.setOpenDisputes(open.n);
-    this.log.log(`City ready: ${this.city.buildings.length} buildings, ${fleet.length} taxis, ${this.city.busLines.length} bus lines`);
+    this.log.log(
+      `District ${this.city.districtId} ${this.city.version}: ${this.city.buildings.length} buildings, ${this.city.addresses.length} addresses, ${fleet.length} taxis, ${this.city.busLines.length} bus lines`,
+    );
   }
 
   onApplicationBootstrap() {

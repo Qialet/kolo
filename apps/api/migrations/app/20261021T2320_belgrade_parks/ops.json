@@ -1,0 +1,115 @@
+[
+  {
+    "id": "column.public.Park.x",
+    "label": "Add column \"x\" to \"Park\"",
+    "operationClass": "additive",
+    "target": {
+      "id": "postgres",
+      "details": {
+        "schema": "public",
+        "objectType": "column",
+        "name": "x",
+        "table": "Park"
+      }
+    },
+    "precheck": [
+      {
+        "description": "ensure column \"x\" is missing",
+        "sql": "SELECT NOT EXISTS (SELECT 1 AS \"one\" FROM \"information_schema\".\"columns\" WHERE (\"table_schema\" = $1 AND \"table_name\" = $2 AND \"column_name\" = $3)) AS \"result\"",
+        "params": [
+          "public",
+          "Park",
+          "x"
+        ]
+      }
+    ],
+    "execute": [
+      {
+        "description": "add column \"x\"",
+        "sql": "ALTER TABLE \"public\".\"Park\" ADD COLUMN \"x\" float8"
+      }
+    ],
+    "postcheck": [
+      {
+        "description": "verify column \"x\" exists",
+        "sql": "SELECT EXISTS (SELECT 1 AS \"one\" FROM \"information_schema\".\"columns\" WHERE (\"table_schema\" = $1 AND \"table_name\" = $2 AND \"column_name\" = $3)) AS \"result\"",
+        "params": [
+          "public",
+          "Park",
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "column.public.Park.z",
+    "label": "Add column \"z\" to \"Park\"",
+    "operationClass": "additive",
+    "target": {
+      "id": "postgres",
+      "details": {
+        "schema": "public",
+        "objectType": "column",
+        "name": "z",
+        "table": "Park"
+      }
+    },
+    "precheck": [
+      {
+        "description": "ensure column \"z\" is missing",
+        "sql": "SELECT NOT EXISTS (SELECT 1 AS \"one\" FROM \"information_schema\".\"columns\" WHERE (\"table_schema\" = $1 AND \"table_name\" = $2 AND \"column_name\" = $3)) AS \"result\"",
+        "params": [
+          "public",
+          "Park",
+          "z"
+        ]
+      }
+    ],
+    "execute": [
+      {
+        "description": "add column \"z\"",
+        "sql": "ALTER TABLE \"public\".\"Park\" ADD COLUMN \"z\" float8"
+      }
+    ],
+    "postcheck": [
+      {
+        "description": "verify column \"z\" exists",
+        "sql": "SELECT EXISTS (SELECT 1 AS \"one\" FROM \"information_schema\".\"columns\" WHERE (\"table_schema\" = $1 AND \"table_name\" = $2 AND \"column_name\" = $3)) AS \"result\"",
+        "params": [
+          "public",
+          "Park",
+          "z"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "data.public.Order.reset-procedural-city",
+    "label": "Delete orders of the procedural city",
+    "summary": "Deletes every order; events and disputes go with them",
+    "operationClass": "destructive",
+    "target": {
+      "id": "postgres",
+      "details": {
+        "schema": "public",
+        "objectType": "table",
+        "name": "Order"
+      }
+    },
+    "precheck": [],
+    "execute": [
+      {
+        "description": "delete all orders",
+        "sql": "DELETE FROM \"public\".\"Order\"",
+        "params": []
+      }
+    ],
+    "postcheck": [
+      {
+        "description": "verify no orders are left",
+        "sql": "SELECT NOT EXISTS (SELECT 1 FROM \"public\".\"Order\") AS \"result\"",
+        "params": []
+      }
+    ]
+  }
+]
