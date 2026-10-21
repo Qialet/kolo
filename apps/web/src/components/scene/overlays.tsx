@@ -9,7 +9,7 @@ import * as THREE from 'three';
 import { palette } from '@/lib/palette';
 import { useBus, useOrder, useTaxi } from '@/lib/queries';
 import { useUi } from '@/lib/ui-store';
-import { flatPolygon } from './city-geometry';
+import { extrudeBuilding, flatPolygon } from './city-geometry';
 import { livePoses } from './vehicles';
 
 /** 3D parts of the selection overlay (rings, routes, outlines). Text lives in SceneLabels. */
@@ -128,10 +128,10 @@ function VehicleRing({ id, color, size = 5 }: { id: string; color: string; size?
 
 function BuildingOutline({ city, id }: { city: City; id: string }) {
   const b = city.buildings.find((x) => x.id === id);
-  const geo = useMemo(() => (b ? new THREE.EdgesGeometry(new THREE.BoxGeometry(b.w + 0.4, b.h + 0.4, b.d + 0.4)) : null), [b]);
-  if (!b || !geo) return null;
+  const geo = useMemo(() => (b ? new THREE.EdgesGeometry(extrudeBuilding(b), 25) : null), [b]);
+  if (!geo) return null;
   return (
-    <lineSegments position={[b.x, 0.2 + b.h / 2, b.z]} geometry={geo}>
+    <lineSegments geometry={geo}>
       <lineBasicMaterial color={palette.taxiDeep} />
     </lineSegments>
   );

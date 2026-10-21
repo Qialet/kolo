@@ -137,14 +137,26 @@ function DepotLabels() {
 function PoiLabels() {
   const city = getCity();
   const select = useUi((s) => s.select);
-  const pois = useMemo(() => city.buildings.filter((b) => b.kind === 'poi' && b.name), [city]);
+  const focus = useUi((s) => s.focus);
+  // Busier places only: the district has well over a hundred.
+  const pois = useMemo(
+    () =>
+      city.pois
+        .filter((p) => p.weight >= 2)
+        .map((p) => {
+          const buildingId = city.addressById.get(p.addressId)?.buildingId ?? null;
+          const building = buildingId ? city.buildings.find((b) => b.id === buildingId) : undefined;
+          return { ...p, buildingId: building?.id ?? null, y: (building?.h ?? 3) + 3 };
+        }),
+    [city],
+  );
   return (
     <>
       {pois.map((p) => (
-        <WorldLabel key={p.id} anchor={{ x: p.x, y: p.h + 3, z: p.z }} interactive>
+        <WorldLabel key={p.id} anchor={{ x: p.x, y: p.y, z: p.z }} interactive>
           <button
             type="button"
-            onClick={() => select({ kind: 'building', id: p.id })}
+            onClick={() => (p.buildingId ? select({ kind: 'building', id: p.buildingId }) : focus(p.x, p.z, { zoom: 6 }))}
             className="rounded-full bg-white/90 px-2 py-0.5 text-[10px] font-semibold whitespace-nowrap shadow ring-1 ring-black/5"
           >
             {p.name}

@@ -1,4 +1,4 @@
-import { poseAlong, type AreaKind, type City, type Lane, type Vec2 } from '@kolo/sim';
+import { poseAlong, type AreaKind, type Building, type City, type Lane, type Vec2 } from '@kolo/sim';
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { palette } from '@/lib/palette';
@@ -309,37 +309,111 @@ export function buildPlaygroundGeometry(city: City) {
   return merge(parts);
 }
 
-/** Adds a procedural window grid to vertical faces (floors every 3.2 m, ground floor plain). */
+/** Building tint by use: partner yards and public buildings stand out a little. */
+export function buildingTint(b: Building): string {
+  if (b.kind === 'garage') return '#FFE2D6';
+  if (b.kind === 'depot-office') return '#E6E0FF';
+  if (b.kind === 'civic') return palette.poiTint;
+  if (b.kind === 'religious') return '#F4EEE4';
+  return palette.buildingTints[b.tint % palette.buildingTints.length]!;
+}
+
+/** Footprint extruded to the building height (shape space is x, -z; extrusion becomes y). */
+export function extrudeBuilding(b: Building): THREE.BufferGeometry {
+  const toShape = (ring: Vec2[]) => ring.map((p) => new THREE.Vector2(p.x, -p.z));
+  const outer = toShape(b.outline);
+  if (THREE.ShapeUtils.isClockWise(outer)) outer.reverse();
+  const shape = new THREE.Shape(outer);
+  for (const h of b.holes) {
+    const hole = toShape(h);
+    if (!THREE.ShapeUtils.isClockWise(hole)) hole.reverse();
+    shape.holes.push(new THREE.Path(hole));
+  }
+  const g = new THREE.ExtrudeGeometry(shape, { depth: b.h, bevelEnabled: false });
+  g.rotateX(-Math.PI / 2);
+  g.translate(0, LEVEL.ground, 0);
+  return g;
+}
+
+/**
+ * All buildings in one mesh: a vertical colour gradient, the storey height per vertex for the
+ * window shader, and the first triangle of every building for picking.
+ */
+export function buildBuildingGeometry(city: City) {
+  const started = performance.now();
+  const parts: THREE.BufferGeometry[] = [];
+  const firstTriangle = new Uint32Array(city.buildings.length + 1);
+  let triangles = 0;
+  const base = new THREE.Color(palette.buildingBase);
+  city.buildings.forEach((b, i) => {
+    firstTriangle[i] = triangles;
+    const extruded = extrudeBuilding(b);
+    const g = extruded.index ? extruded.toNonIndexed() : extruded;
+    g.deleteAttribute('uv');
+    g.computeVertexNormals();
+    const pos = g.attributes.position!;
+    const colors = new Float32Array(pos.count * 3);
+    const floors = new Float32Array(pos.count).fill(b.h / Math.max(1, b.levels));
+    const top = new THREE.Color(buildingTint(b));
+    for (let k = 0; k < pos.count; k++) {
+      tmpColor.copy(base).lerp(top, Math.min(1, (pos.getY(k) - LEVEL.ground) / Math.max(1, b.h)));
+      colors.set([tmpColor.r, tmpColor.g, tmpColor.b], k * 3);
+    }
+    g.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    g.setAttribute('floorH', new THREE.BufferAttribute(floors, 1));
+    triangles += pos.count / 3;
+    parts.push(g);
+  });
+  firstTriangle[city.buildings.length] = triangles;
+  const geometry = parts.length ? mergeGeometries(parts) : new THREE.BufferGeometry();
+  for (const p of parts) p.dispose();
+  if (!geometry) throw new Error('Could not merge buildings');
+  return { geometry, firstTriangle, triangles, ms: Math.round(performance.now() - started) };
+}
+
+/** Index of the building that owns a triangle of the merged mesh. */
+export function buildingOfTriangle(firstTriangle: Uint32Array, face: number): number {
+  let lo = 0;
+  let hi = firstTriangle.length - 2;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (firstTriangle[mid]! <= face) lo = mid;
+    else hi = mid - 1;
+  }
+  return lo;
+}
+
+/**
+ * Window grid on walls: rows by each building's storey height (floorH attribute), columns every
+ * 2.7 m along the wall whatever its direction; the ground floor stays plain.
+ */
 export function withWindows(material: THREE.MeshStandardMaterial) {
   material.onBeforeCompile = (shader) => {
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\nvarying vec3 vKoloWorld;\nvarying vec3 vKoloNormal;')
+      .replace('#include <common>', '#include <common>\nattribute float floorH;\nvarying vec3 vKoloWorld;\nvarying vec3 vKoloNormal;\nvarying float vKoloFloor;')
       .replace(
         '#include <worldpos_vertex>',
         `#include <worldpos_vertex>
-        vec4 koloW = vec4(transformed, 1.0);
-        #ifdef USE_INSTANCING
-          koloW = instanceMatrix * koloW;
-        #endif
-        vKoloWorld = (modelMatrix * koloW).xyz;
-        vKoloNormal = normal;`,
+        vKoloWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;
+        vKoloNormal = normal;
+        vKoloFloor = floorH;`,
       );
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', '#include <common>\nvarying vec3 vKoloWorld;\nvarying vec3 vKoloNormal;')
+      .replace('#include <common>', '#include <common>\nvarying vec3 vKoloWorld;\nvarying vec3 vKoloNormal;\nvarying float vKoloFloor;')
       .replace(
         '#include <color_fragment>',
         `#include <color_fragment>
-        if (abs(vKoloNormal.y) < 0.5 && vKoloWorld.y > 3.6) {
-          float floorF = fract(vKoloWorld.y / 3.2);
+        float koloY = vKoloWorld.y - (${LEVEL.ground.toFixed(2)});
+        if (abs(vKoloNormal.y) < 0.5 && koloY > min(vKoloFloor, 3.6) + 0.4) {
+          float floorF = fract(koloY / vKoloFloor);
           float rowMask = step(0.34, floorF) * step(floorF, 0.78);
-          float h = abs(vKoloNormal.x) > 0.5 ? vKoloWorld.z : vKoloWorld.x;
-          float col = fract(h / 2.7);
+          vec2 along = normalize(vec2(-vKoloNormal.z, vKoloNormal.x));
+          float col = fract(dot(vKoloWorld.xz, along) / 2.7);
           float colMask = step(0.22, col) * step(col, 0.78);
-          float m = rowMask * colMask;
-          diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.6, 0.67, 0.78), m * 0.5);
+          diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.6, 0.67, 0.78), rowMask * colMask * 0.5);
         }`,
       );
   };
-  material.customProgramCacheKey = () => 'kolo-windows';
+  material.customProgramCacheKey = () => 'kolo-windows-v2';
   return material;
 }

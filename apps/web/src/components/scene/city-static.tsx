@@ -1,11 +1,23 @@
 'use client';
 
+import type { ThreeEvent } from '@react-three/fiber';
 import type { City } from '@kolo/sim';
 import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { palette } from '@/lib/palette';
 import { useUi } from '@/lib/ui-store';
-import { buildDepotGeometry, buildGroundGeometry, buildMarkingsGeometry, buildPlaygroundGeometry, buildRoadGeometry, flatPolygon, LEVEL } from './city-geometry';
+import {
+  buildBuildingGeometry,
+  buildDepotGeometry,
+  buildGroundGeometry,
+  buildingOfTriangle,
+  buildMarkingsGeometry,
+  buildPlaygroundGeometry,
+  buildRoadGeometry,
+  flatPolygon,
+  LEVEL,
+  withWindows,
+} from './city-geometry';
 
 const tmp = new THREE.Object3D();
 const color = new THREE.Color();
@@ -14,6 +26,7 @@ export function CityStatic({ city }: { city: City }) {
   return (
     <group>
       <Ground city={city} />
+      <Buildings city={city} />
       <Trees city={city} />
       <Playgrounds city={city} />
       <Depots city={city} />
@@ -51,6 +64,37 @@ function Ground({ city }: { city: City }) {
         <meshStandardMaterial vertexColors roughness={0.8} transparent opacity={0.7} polygonOffset polygonOffsetFactor={-2} />
       </mesh>
     </group>
+  );
+}
+
+function Buildings({ city }: { city: City }) {
+  const { geometry, firstTriangle, triangles, ms } = useMemo(() => buildBuildingGeometry(city), [city]);
+  useEffect(() => {
+    if (process.env.NODE_ENV !== 'production') console.info(`[kolo] buildings: ${city.buildings.length}, ${triangles} triangles, ${ms} ms`);
+  }, [city, triangles, ms]);
+  const material = useMemo(() => withWindows(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0 })), []);
+  const select = useUi((s) => s.select);
+  const hover = useUi((s) => s.hover);
+  const buildingAt = (e: ThreeEvent<PointerEvent | MouseEvent>) =>
+    e.faceIndex !== undefined && e.faceIndex !== null ? city.buildings[buildingOfTriangle(firstTriangle, e.faceIndex)] : undefined;
+  return (
+    <mesh
+      geometry={geometry}
+      material={material}
+      castShadow
+      receiveShadow
+      onClick={(e) => {
+        e.stopPropagation();
+        const b = buildingAt(e);
+        if (b) select({ kind: 'building', id: b.id });
+      }}
+      onPointerMove={(e) => {
+        e.stopPropagation();
+        const b = buildingAt(e);
+        hover(b ? `building:${b.id}` : null);
+      }}
+      onPointerOut={() => hover(null)}
+    />
   );
 }
 

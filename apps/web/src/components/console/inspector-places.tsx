@@ -2,6 +2,7 @@
 
 import { Building2Icon, BusIcon, MapPinIcon, WarehouseIcon } from 'lucide-react';
 import { useMemo } from 'react';
+import type { Vec2 } from '@kolo/sim';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Separator } from '@/components/ui/separator';
@@ -80,15 +81,18 @@ function Stat({ label, value }: { label: string; value: number | undefined }) {
 
 const KIND_LABEL: Record<string, string> = {
   residential: 'Жилой дом',
+  house: 'Частный дом',
   office: 'Офисное здание',
-  poi: 'Точка притяжения',
+  retail: 'Торговое здание',
+  civic: 'Общественное здание',
+  religious: 'Храм',
+  industrial: 'Хозяйственное здание',
   garage: 'Сервисные боксы',
   'depot-office': 'Офис таксопарка',
-  stall: 'Торговый павильон',
-  kiosk: 'Киоск',
-  shed: 'Дворовые гаражи',
-  outbuilding: 'Дворовый флигель',
 };
+
+/** Footprint area of an outline (shoelace). */
+const footprint = (ring: Vec2[]) => Math.abs(ring.reduce((s, p, i) => s + p.x * ring[(i + 1) % ring.length]!.z - ring[(i + 1) % ring.length]!.x * p.z, 0)) / 2;
 
 export function BuildingInspector({ id }: { id: string }) {
   const city = getCity();
@@ -96,7 +100,8 @@ export function BuildingInspector({ id }: { id: string }) {
   const addr = b.addressId ? city.addressById.get(b.addressId) : undefined;
   const focus = useUi((s) => s.focus);
   const openCreate = useUi((s) => s.openCreateOrder);
-  const floors = Math.max(1, Math.round(b.h / 3.2));
+  const floors = b.levels;
+  const area = Math.round(footprint(b.outline) - b.holes.reduce((s, h) => s + footprint(h), 0));
   return (
     <>
       <InspectorHeader
@@ -104,7 +109,7 @@ export function BuildingInspector({ id }: { id: string }) {
         iconClass="bg-secondary text-foreground"
         eyebrow={KIND_LABEL[b.kind] ?? 'Здание'}
         title={b.name ?? addr?.label ?? 'Без адреса'}
-        subtitle={b.name ? addr?.label : `${floors} этаж(ей) · ${Math.round(b.w * b.d)} м² в плане`}
+        subtitle={b.name ? addr?.label : `${floors} этаж(ей) · ${area} м² в плане`}
         onFocus={() => focus(b.x, b.z, { zoom: 8 })}
       />
       <Section title="Адрес и подъезд">
@@ -115,7 +120,7 @@ export function BuildingInspector({ id }: { id: string }) {
             <Row label="Этажность">{floors}</Row>
           </>
         ) : (
-          <p className="text-[13px] text-muted-foreground">Здание стоит во дворе и не имеет отдельной точки подачи.</p>
+          <p className="text-[13px] text-muted-foreground">У здания нет адреса в OpenStreetMap, точки подачи нет.</p>
         )}
       </Section>
       {addr && (
