@@ -19,8 +19,9 @@ const district = buildDistrict(osm.elements, {
 mkdirSync(dirname(outPath), { recursive: true });
 const json = JSON.stringify(district);
 writeFileSync(outPath, json);
-const { roads, meta } = district;
+const { roads, meta, buildings, areas, addresses, pois, depotSites, trees } = district;
 console.log(
   `${outPath}: ${(json.length / 1024).toFixed(0)} KB, version ${meta.version}, ` +
-    `${roads.nodes.length} nodes, ${roads.edges.length} edges, ${roads.restrictions.length} restrictions`,
+    `${roads.nodes.length} nodes, ${roads.edges.length} edges, ${roads.restrictions.length} restrictions; ` +
+    `${buildings.length} buildings, ${areas.length} areas, ${trees.length / 2} trees, ${addresses.length} addresses, ${pois.length} POIs, ${depotSites.length} depot lots`,
 );

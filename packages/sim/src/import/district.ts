@@ -1,4 +1,5 @@
 import type { District } from '../city/district.js';
+import { DEPOT_SITES, importPlaces, type DepotSiteSpec } from './osm-places.js';
 import { boundsOfBBox, importRoads, type OsmElement } from './osm-roads.js';
 import { BELGRADE_ANCHOR, type BBoxDeg } from './project.js';
 
@@ -7,10 +8,13 @@ export interface DistrictOptions {
   name: string;
   bbox: BBoxDeg;
   osmTimestamp: string;
+  /** Real lots for partner depots (defaults to the agreed Belgrade sites). */
+  depotSites?: DepotSiteSpec[];
 }
 
 /** Assembles a district file from raw OSM elements; meta.version hashes everything else. */
 export function buildDistrict(elements: OsmElement[], opts: DistrictOptions): District {
+  const roads = importRoads(elements, opts.bbox);
   const district: District = {
     meta: {
       id: opts.id,
@@ -22,7 +26,8 @@ export function buildDistrict(elements: OsmElement[], opts: DistrictOptions): Di
       gtfsVersion: null,
       version: '',
     },
-    roads: importRoads(elements, opts.bbox),
+    roads,
+    ...importPlaces(elements, opts.bbox, roads, opts.depotSites ?? DEPOT_SITES),
   };
   district.meta.version = fnv1a(JSON.stringify(district));
   return district;
