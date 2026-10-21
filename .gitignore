@@ -9,6 +9,7 @@ coverage/
 .env.local
 *.log
 .DS_Store
+data/raw/
 .idea/
 .vscode/
 
