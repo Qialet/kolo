@@ -7,8 +7,11 @@ import type { FleetStatus, LightAspect, LightMode, OrderStatus, TaxiActivity, Ve
  */
 export type VehicleTuple = [string, number, number, number, number, number, number, number];
 
-/** Per signalised intersection: [nsAspectIndex, ewAspectIndex, nsSecondsLeft, ewSecondsLeft] (-1 = held). */
-export type LightTuple = [number, number, number, number];
+/**
+ * Per signalised intersection with n phases: n aspect indexes, then n "seconds until change" (-1 = held).
+ * Phases are indexed like the intersection's signal plan.
+ */
+export type LightTuple = number[];
 
 export interface LiveFrame {
   /** Simulation clock in seconds. */
@@ -105,14 +108,18 @@ export interface LightDetail {
   intersectionId: string;
   name: string;
   mode: LightMode;
-  ns: LightAspect;
-  ew: LightAspect;
-  secondsLeft: number;
-  greenNs: number;
-  greenEw: number;
+  holdPhase: number;
+  phases: LightPhaseDetail[];
   cycleSec: number;
-  queueNs: number;
-  queueEw: number;
+}
+
+export interface LightPhaseDetail {
+  /** Streets whose approaches move in this phase, e.g. «Kralja Milana». */
+  label: string;
+  aspect: LightAspect;
+  secondsLeft: number;
+  green: number;
+  queue: number;
 }
 
 export interface BusDetail {

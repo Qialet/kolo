@@ -890,9 +890,12 @@ export class Simulation {
   setLight(nodeId: number, input: LightControlInput): boolean {
     const sig = this.traffic.signals[nodeId];
     if (!sig) return false;
+    const n = sig.plan.phases.length;
+    if (input.holdPhase !== undefined && input.holdPhase >= n) return false;
+    if (input.greens && input.greens.length !== n) return false;
     if (input.mode) sig.mode = input.mode;
-    if (input.greenNs) sig.plan.greenNs = input.greenNs;
-    if (input.greenEw) sig.plan.greenEw = input.greenEw;
+    if (input.holdPhase !== undefined) sig.holdPhase = input.holdPhase;
+    input.greens?.forEach((g, i) => (sig.plan.phases[i]!.green = g));
     return true;
   }
 
@@ -936,10 +939,8 @@ export class Simulation {
     const lights = this.traffic.signalStates.map((st) =>
       st
         ? ([
-            LIGHT_ASPECTS.indexOf(st.ns),
-            LIGHT_ASPECTS.indexOf(st.ew),
-            Number.isFinite(st.nsLeft) ? Math.round(st.nsLeft * 10) / 10 : -1,
-            Number.isFinite(st.ewLeft) ? Math.round(st.ewLeft * 10) / 10 : -1,
+            ...st.aspects.map((a) => LIGHT_ASPECTS.indexOf(a)),
+            ...st.left.map((l) => (Number.isFinite(l) ? Math.round(l * 10) / 10 : -1)),
           ] as LightTuple)
         : null,
     );
@@ -1014,21 +1015,23 @@ export class Simulation {
     const sig = this.traffic.signals[nodeId];
     if (!node || !sig) return null;
     const st = signalState(sig, this.traffic.t);
-    const nsIn = node.in.filter((s) => this.city.segments[s]!.axis === 'NS');
-    const ewIn = node.in.filter((s) => this.city.segments[s]!.axis === 'EW');
-    const left = Math.min(st.nsLeft, st.ewLeft);
     return {
       intersectionId: String(nodeId),
       name: node.name,
       mode: sig.mode,
-      ns: st.ns,
-      ew: st.ew,
-      secondsLeft: Number.isFinite(left) ? Math.round(left * 10) / 10 : -1,
-      greenNs: sig.plan.greenNs,
-      greenEw: sig.plan.greenEw,
+      holdPhase: sig.holdPhase,
+      phases: sig.plan.phases.map((p, i) => {
+        const segs = node.in.filter((s) => this.city.segments[s]!.phase === i);
+        const left = st.left[i]!;
+        return {
+          label: [...new Set(segs.map((s) => this.city.streets[this.city.segments[s]!.street]!.name))].join(' · '),
+          aspect: st.aspects[i]!,
+          secondsLeft: Number.isFinite(left) ? Math.round(left * 10) / 10 : -1,
+          green: p.green,
+          queue: this.traffic.queueOn(segs),
+        };
+      }),
       cycleSec: cycleOf(sig.plan),
-      queueNs: this.traffic.queueOn(nsIn),
-      queueEw: this.traffic.queueOn(ewIn),
     };
   }
 

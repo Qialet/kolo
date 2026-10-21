@@ -20,9 +20,14 @@ export interface Street {
   speed: number;
 }
 
+export interface SignalPhase {
+  /** Green seconds. */
+  green: number;
+}
+
+/** Phases are served in order; every incoming segment of the node belongs to one phase. */
 export interface SignalPlan {
-  greenNs: number;
-  greenEw: number;
+  phases: SignalPhase[];
   offset: number;
 }
 
@@ -40,8 +45,6 @@ export interface CityNode {
   in: number[];
   out: number[];
   signal: SignalPlan | null;
-  /** For unsignalised junctions: the axis that has right of way. */
-  priority: Axis | null;
   name: string;
 }
 
@@ -56,6 +59,10 @@ export interface Segment {
   length: number;
   speed: number;
   reverse: number;
+  /** Right of way at the end node: approaches with a lower rank yield to higher ones. */
+  rank: number;
+  /** Signal phase of this approach at the end node (0 when unsignalised). */
+  phase: number;
 }
 
 export interface Lane {
@@ -80,7 +87,8 @@ export interface Connector {
   from: number;
   to: number;
   turn: Turn;
-  approach: Axis;
+  /** Signal phase that lets this connector move (the phase of its incoming segment). */
+  phase: number;
   line: Polyline;
   vmax: number;
   conflicts: number[];

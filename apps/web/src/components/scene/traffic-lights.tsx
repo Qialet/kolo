@@ -11,7 +11,7 @@ import { useUi } from '@/lib/ui-store';
 
 interface Approach {
   node: number;
-  axis: 'NS' | 'EW';
+  phase: number;
   /** Pole foot. */
   x: number;
   z: number;
@@ -49,7 +49,7 @@ function approachesOf(city: City): Approach[] {
       const off = street.median + laneSpan / 2;
       out.push({
         node: node.id,
-        axis: seg.axis,
+        phase: seg.phase,
         x: node.x - d.x * back + right.x * side,
         z: node.z - d.z * back + right.z * side,
         heading: headingOf({ x: -d.x, z: -d.z }),
@@ -130,7 +130,7 @@ export function TrafficLights({ city }: { city: City }) {
       const a = approaches[i]!;
       const st = frame.lights[a.node];
       if (!st) continue;
-      const [r, y, g, bar] = lamps(a.axis === 'NS' ? st[0] : st[1], blinkOn);
+      const [r, y, g, bar] = lamps(st[a.phase]!, blinkOn);
       red.current?.setColorAt(i, r);
       amber.current?.setColorAt(i, y);
       green.current?.setColorAt(i, g);

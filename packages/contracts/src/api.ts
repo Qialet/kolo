@@ -44,8 +44,9 @@ export type SimControlInput = z.infer<typeof SimControlInput>;
 
 export const LightControlInput = z.object({
   mode: z.enum(values(LightMode)).optional(),
-  greenNs: z.number().int().min(8).max(90).optional(),
-  greenEw: z.number().int().min(8).max(90).optional(),
+  holdPhase: z.number().int().min(0).max(7).optional(),
+  /** Green seconds per phase, indexed like LightDetail.phases. */
+  greens: z.array(z.number().int().min(8).max(90)).min(1).max(8).optional(),
 });
 export type LightControlInput = z.infer<typeof LightControlInput>;
 

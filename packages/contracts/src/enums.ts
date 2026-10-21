@@ -83,7 +83,7 @@ export type LightAspect = (typeof LIGHT_ASPECTS)[number];
 export const LightMode = {
   AUTO: 'AUTO',
   FLASHING: 'FLASHING',
-  HOLD_NS: 'HOLD_NS',
-  HOLD_EW: 'HOLD_EW',
+  /** Keep one phase green (see holdPhase). */
+  HOLD: 'HOLD',
 } as const;
 export type LightMode = (typeof LightMode)[keyof typeof LightMode];

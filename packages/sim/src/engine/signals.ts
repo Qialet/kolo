@@ -1,82 +1,61 @@
 import type { LightAspect, LightMode } from '@kolo/contracts';
-import type { Axis, SignalPlan } from '../city/types.js';
+import type { SignalPlan } from '../city/types.js';
 
 export const AMBER = 3;
 export const ALL_RED = 1;
 export const RED_AMBER = 2;
-/** Seconds added to the two greens to get the full cycle. */
-export const CYCLE_OVERHEAD = 2 * (AMBER + ALL_RED + RED_AMBER);
+/** Seconds each phase change adds to the cycle. */
+export const TRANSITION = AMBER + ALL_RED + RED_AMBER;
 
 export interface SignalRuntime {
   plan: SignalPlan;
   mode: LightMode;
+  /** Phase kept green in HOLD mode. */
+  holdPhase: number;
 }
 
 export interface SignalState {
-  ns: LightAspect;
-  ew: LightAspect;
-  /** Seconds until the NS / EW aspect changes (Infinity when held). */
-  nsLeft: number;
-  ewLeft: number;
+  /** Aspect of every phase, indexed like plan.phases. */
+  aspects: LightAspect[];
+  /** Seconds until each phase's aspect changes (Infinity when held). */
+  left: number[];
 }
 
-export const cycleOf = (plan: SignalPlan) => plan.greenNs + plan.greenEw + CYCLE_OVERHEAD;
+export const cycleOf = (plan: SignalPlan) => plan.phases.reduce((a, p) => a + p.green + TRANSITION, 0);
 
 /**
- * Serbian signal sequence for a two-phase junction:
- * GREEN → AMBER → (all red) → RED_AMBER on the crossing axis → its GREEN, and so on.
+ * Serbian signal sequence over phases served in turn:
+ * GREEN → AMBER → (all red) → RED_AMBER on the next phase → its GREEN, and so on around the cycle.
  */
 export function signalState(sig: SignalRuntime, t: number): SignalState {
-  if (sig.mode === 'FLASHING') return { ns: 'FLASHING', ew: 'FLASHING', nsLeft: Infinity, ewLeft: Infinity };
-  if (sig.mode === 'HOLD_NS') return { ns: 'GREEN', ew: 'RED', nsLeft: Infinity, ewLeft: Infinity };
-  if (sig.mode === 'HOLD_EW') return { ns: 'RED', ew: 'GREEN', nsLeft: Infinity, ewLeft: Infinity };
-  const { greenNs: gn, greenEw: ge, offset } = sig.plan;
+  const n = sig.plan.phases.length;
+  if (sig.mode === 'FLASHING') return { aspects: Array(n).fill('FLASHING'), left: Array(n).fill(Infinity) };
+  if (sig.mode === 'HOLD') {
+    return { aspects: sig.plan.phases.map((_, i) => (i === sig.holdPhase ? 'GREEN' : 'RED')), left: Array(n).fill(Infinity) };
+  }
   const cycle = cycleOf(sig.plan);
-  const tc = (((t + offset) % cycle) + cycle) % cycle;
-  // Phase boundaries.
-  const nsAmber = gn;
-  const allRed1 = nsAmber + AMBER;
-  const ewRedAmber = allRed1 + ALL_RED;
-  const ewGreen = ewRedAmber + RED_AMBER;
-  const ewAmber = ewGreen + ge;
-  const allRed2 = ewAmber + AMBER;
-  const nsRedAmber = allRed2 + ALL_RED;
-  const nsGreenNext = cycle;
-
-  let ns: LightAspect;
-  let ew: LightAspect;
-  let nsLeft: number;
-  let ewLeft: number;
-  if (tc < nsAmber) {
-    ns = 'GREEN';
-    nsLeft = nsAmber - tc;
-  } else if (tc < allRed1) {
-    ns = 'AMBER';
-    nsLeft = allRed1 - tc;
-  } else if (tc < nsRedAmber) {
-    ns = 'RED';
-    nsLeft = nsRedAmber - tc;
-  } else {
-    ns = 'RED_AMBER';
-    nsLeft = nsGreenNext - tc;
+  const tc = (((t + sig.plan.offset) % cycle) + cycle) % cycle;
+  const aspects: LightAspect[] = [];
+  const left: number[] = [];
+  let greenStart = 0;
+  for (const { green } of sig.plan.phases) {
+    const rel = (((tc - greenStart) % cycle) + cycle) % cycle;
+    if (rel < green) {
+      aspects.push('GREEN');
+      left.push(green - rel);
+    } else if (rel < green + AMBER) {
+      aspects.push('AMBER');
+      left.push(green + AMBER - rel);
+    } else if (rel >= cycle - RED_AMBER) {
+      aspects.push('RED_AMBER');
+      left.push(cycle - rel);
+    } else {
+      aspects.push('RED');
+      left.push(cycle - RED_AMBER - rel);
+    }
+    greenStart += green + TRANSITION;
   }
-  if (tc < ewRedAmber) {
-    ew = 'RED';
-    ewLeft = ewRedAmber - tc;
-  } else if (tc < ewGreen) {
-    ew = 'RED_AMBER';
-    ewLeft = ewGreen - tc;
-  } else if (tc < ewAmber) {
-    ew = 'GREEN';
-    ewLeft = ewAmber - tc;
-  } else if (tc < allRed2) {
-    ew = 'AMBER';
-    ewLeft = allRed2 - tc;
-  } else {
-    ew = 'RED';
-    ewLeft = cycle - tc + ewRedAmber;
-  }
-  return { ns, ew, nsLeft, ewLeft };
+  return { aspects, left };
 }
 
-export const aspectFor = (state: SignalState, axis: Axis) => (axis === 'NS' ? state.ns : state.ew);
+export const isFlashing = (state: SignalState | null | undefined) => !state || state.aspects[0] === 'FLASHING';

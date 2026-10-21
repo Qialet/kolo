@@ -148,7 +148,6 @@ function buildNodes(b: Builder) {
         in: [],
         out: [],
         signal: null,
-        priority: null,
         name: `${ns.name} × ${ew.name}`,
       };
       city.nodes.push(node);
@@ -178,6 +177,8 @@ function buildSegments(b: Builder) {
         length: dist(from, to),
         speed: street.speed,
         reverse: -1,
+        rank: 1,
+        phase: street.axis === 'NS' ? 0 : 1,
       };
       city.segments.push(seg);
       city.segmentByKey.set(`${from.id}>${to.id}`, seg.id);
@@ -277,7 +278,7 @@ function buildConnectors(b: Builder) {
               from: inLane.id,
               to: outLane.id,
               turn,
-              approach: inSeg.axis,
+              phase: inSeg.phase,
               line: polyline(points),
               vmax,
               conflicts: [],
@@ -310,16 +311,22 @@ function configureJunctions(b: Builder) {
     const degree = node.out.length;
     const vs = city.streets[node.vStreet]!;
     const hs = city.streets[node.hStreet]!;
+    // Right of way when unsignalised (or flashing): the through street of a T, else the boulevard.
+    let priority: Axis = hs.cls === 'boulevard' ? 'EW' : vs.cls === 'boulevard' ? 'NS' : 'EW';
     if (degree >= 4) {
       const greenNs = vs.cls === 'boulevard' ? 30 : hs.cls === 'boulevard' ? 16 : 20;
       const greenEw = hs.cls === 'boulevard' ? 30 : vs.cls === 'boulevard' ? 16 : 20;
       const cycle = greenNs + greenEw + 12;
       // Green wave eastbound along the EW boulevard, random elsewhere.
       const offset = hs.cls === 'boulevard' ? ((node.x + WORLD_HALF) / 12.5) % cycle : rng.range(0, cycle);
-      node.signal = { greenNs, greenEw, offset };
+      node.signal = { phases: [{ green: greenNs }, { green: greenEw }], offset };
     } else if (degree === 3) {
       const nsThrough = node.out.some((s) => city.segments[s]!.dir.z < 0) && node.out.some((s) => city.segments[s]!.dir.z > 0);
-      node.priority = nsThrough ? 'NS' : 'EW';
+      priority = nsThrough ? 'NS' : 'EW';
+    }
+    for (const segId of node.in) {
+      const seg = city.segments[segId]!;
+      seg.rank = seg.axis === priority ? 2 : 1;
     }
   }
 }

@@ -238,9 +238,10 @@ export function Route({ pickup, dropoff }: { pickup: string; dropoff: string }) 
 const MODES: { mode: LightMode; label: string }[] = [
   { mode: 'AUTO', label: 'Авто' },
   { mode: 'FLASHING', label: 'Жёлтый мигающий' },
-  { mode: 'HOLD_NS', label: 'Держать С–Ю' },
-  { mode: 'HOLD_EW', label: 'Держать З–В' },
 ];
+
+/** Toggle value of a light mode: HOLD carries the held phase ("HOLD:1"). */
+const modeValue = (mode: LightMode, holdPhase: number) => (mode === 'HOLD' ? `HOLD:${holdPhase}` : mode);
 
 const ASPECT_LABEL: Record<string, string> = { RED: 'Красный', RED_AMBER: 'Красный + жёлтый', GREEN: 'Зелёный', AMBER: 'Жёлтый', FLASHING: 'Мигает жёлтый' };
 
@@ -270,16 +271,33 @@ function LightInspector({ id }: { id: number }) {
       <div className="min-h-0 flex-1 overflow-y-auto">
         <Section title="Фазы сейчас">
           <div className="grid grid-cols-2 gap-2">
-            <AxisCard nodeId={id} axis={0} label="Север – Юг" queue={data?.queueNs} />
-            <AxisCard nodeId={id} axis={1} label="Запад – Восток" queue={data?.queueEw} />
+            {data?.phases.map((p, i) => (
+              <PhaseCard key={i} nodeId={id} phase={i} phases={data.phases.length} label={p.label || `Фаза ${i + 1}`} queue={p.queue} />
+            ))}
           </div>
         </Section>
         <Separator />
         <Section title="Режим">
-          <ToggleGroup value={data ? [data.mode] : []} onValueChange={(v) => v[0] && update.mutate({ mode: v[0] as LightMode })} variant="outline" size="sm" className="flex-wrap">
+          <ToggleGroup
+            value={data ? [modeValue(data.mode, data.holdPhase)] : []}
+            onValueChange={(v) => {
+              const value = v[0];
+              if (!value) return;
+              if (value.startsWith('HOLD:')) update.mutate({ mode: 'HOLD', holdPhase: Number(value.slice(5)) });
+              else update.mutate({ mode: value as LightMode });
+            }}
+            variant="outline"
+            size="sm"
+            className="flex-wrap"
+          >
             {MODES.map((m) => (
               <ToggleGroupItem key={m.mode} value={m.mode}>
                 {m.label}
+              </ToggleGroupItem>
+            ))}
+            {data?.phases.map((p, i) => (
+              <ToggleGroupItem key={`hold-${i}`} value={`HOLD:${i}`} title={p.label}>
+                Держать фазу {i + 1}
               </ToggleGroupItem>
             ))}
           </ToggleGroup>
@@ -288,8 +306,14 @@ function LightInspector({ id }: { id: number }) {
         <Section title="Длительность зелёного">
           {data && (
             <div className="flex flex-col gap-2">
-              <GreenStepper label="Север – Юг" value={data.greenNs} onChange={(v) => update.mutate({ greenNs: v })} />
-              <GreenStepper label="Запад – Восток" value={data.greenEw} onChange={(v) => update.mutate({ greenEw: v })} />
+              {data.phases.map((p, i) => (
+                <GreenStepper
+                  key={i}
+                  label={`Фаза ${i + 1}`}
+                  value={p.green}
+                  onChange={(v) => update.mutate({ greens: data.phases.map((q, k) => (k === i ? v : q.green)) })}
+                />
+              ))}
             </div>
           )}
         </Section>
@@ -298,8 +322,8 @@ function LightInspector({ id }: { id: number }) {
   );
 }
 
-/** Aspect and live countdown of one axis, ticking every animation frame. */
-function AxisCard({ nodeId, axis, label, queue }: { nodeId: number; axis: 0 | 1; label: string; queue: number | undefined }) {
+/** Aspect and live countdown of one signal phase, ticking every animation frame. */
+function PhaseCard({ nodeId, phase, phases, label, queue }: { nodeId: number; phase: number; phases: number; label: string; queue: number | undefined }) {
   const dot = useRef<HTMLSpanElement>(null);
   const name = useRef<HTMLDivElement>(null);
   const secs = useRef<HTMLDivElement>(null);
@@ -310,8 +334,8 @@ function AxisCard({ nodeId, axis, label, queue }: { nodeId: number; axis: 0 | 1;
       raf = requestAnimationFrame(tick);
       const st = frameBuffer.latest?.lights[nodeId];
       if (!st || !dot.current || !name.current || !secs.current) return;
-      const aspect = aspects[st[axis]]!;
-      const left = st[axis + 2]!;
+      const aspect = aspects[st[phase]!]!;
+      const left = st[phases + phase]!;
       const elapsed = (performance.now() - frameBuffer.latestAt) / 1000;
       const color = aspect === 'GREEN' ? palette.green : aspect === 'RED' || aspect === 'RED_AMBER' ? palette.red : palette.amber;
       dot.current.style.background = color;
@@ -321,10 +345,12 @@ function AxisCard({ nodeId, axis, label, queue }: { nodeId: number; axis: 0 | 1;
     };
     tick();
     return () => cancelAnimationFrame(raf);
-  }, [nodeId, axis]);
+  }, [nodeId, phase, phases]);
   return (
     <div className="rounded-xl bg-muted/60 p-3">
-      <div className="text-[11px] font-medium text-muted-foreground">{label}</div>
+      <div className="truncate text-[11px] font-medium text-muted-foreground" title={label}>
+        {label}
+      </div>
       <div className="mt-1.5 flex items-center gap-2">
         <span ref={dot} className="size-3 rounded-full" />
         <div ref={secs} className="tabular text-[22px] leading-none font-bold" />

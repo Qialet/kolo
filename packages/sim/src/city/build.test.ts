@@ -24,7 +24,7 @@ describe('buildCity', () => {
   it('signals every four-way junction and gives T-junctions a priority road', () => {
     for (const node of city.nodes) {
       if (node.out.length === 4) expect(node.signal).not.toBeNull();
-      if (node.out.length === 3) expect(node.priority).not.toBeNull();
+      if (node.out.length === 3) expect(new Set(node.in.map((s) => city.segments[s]!.rank)).size).toBe(2);
     }
   });
 

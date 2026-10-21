@@ -1,10 +1,10 @@
 import type { LightMode, VehicleKind } from '@kolo/contracts';
 import { lanePoint } from '../city/build.js';
-import type { City, Connector, CurbRef, Lane } from '../city/types.js';
+import type { City, Connector, CurbRef, Lane, Segment } from '../city/types.js';
 import { dist, headingOf, polyline, poseAt, type Polyline, type Pose, type Vec2 } from '../geometry.js';
 import type { Rng } from '../rng.js';
 import { laneIndexesFor, routeSegments, turnBetween } from './routing.js';
-import { aspectFor, signalState, type SignalRuntime, type SignalState } from './signals.js';
+import { isFlashing, signalState, type SignalRuntime, type SignalState } from './signals.js';
 
 export type VehicleMode = 'lane' | 'conn' | 'pulled' | 'yard' | 'parked';
 
@@ -116,7 +116,7 @@ export class TrafficSystem {
   t = 0;
 
   constructor(readonly city: City) {
-    this.signals = city.nodes.map((n) => (n.signal ? { plan: { ...n.signal }, mode: 'AUTO' as LightMode } : null));
+    this.signals = city.nodes.map((n) => (n.signal ? { plan: { phases: n.signal.phases.map((p) => ({ ...p })), offset: n.signal.offset }, mode: 'AUTO' as LightMode, holdPhase: 0 } : null));
     this.signalStates = this.signals.map((s) => (s ? signalState(s, 0) : null));
     this.occ = city.lanes.map(() => []);
     this.connBusy = new Int16Array(city.connectors.length);
@@ -427,9 +427,9 @@ export class TrafficSystem {
     const { city } = this;
     const node = city.nodes[c.node]!;
     const state = this.signalStates[node.id];
-    const flashing = !state || state.ns === 'FLASHING';
-    if (!flashing) {
-      const aspect = aspectFor(state, c.approach);
+    const flashing = isFlashing(state);
+    if (state && !flashing) {
+      const aspect = state.aspects[c.phase];
       if (aspect === 'AMBER') {
         const stopDist = (v.speed * v.speed) / (2 * v.drv.bComf);
         if (stopDist < toLine - 1) return false;
@@ -442,8 +442,8 @@ export class TrafficSystem {
       if (e.pos - e.v.length < v.length + 2 && e.pos > -1 && e.v.speed < 2) return false;
     }
     if (flashing) {
-      const priority = node.priority ?? (city.streets[node.hStreet]!.cls === 'boulevard' ? 'EW' : city.streets[node.vStreet]!.cls === 'boulevard' ? 'NS' : 'EW');
-      if (c.approach !== priority && this.approachingConflict(node.in, c, (axis) => axis === priority, 32)) return false;
+      const myRank = city.segments[city.lanes[c.from]!.seg]!.rank;
+      if (this.approachingConflict(node.in, c, (seg) => seg.rank > myRank, 32)) return false;
       if (c.turn === 'L' && this.approachingOpposite(node.in, c, 30)) return false;
     } else if (c.turn === 'L' && this.approachingOpposite(node.in, c, 40)) {
       return false;
@@ -452,11 +452,11 @@ export class TrafficSystem {
   }
 
   /** Vehicles close to the stop line on matching approaches whose next connector crosses `c`. */
-  private approachingConflict(inSegs: number[], c: Connector, axisFilter: (axis: 'NS' | 'EW') => boolean, range: number) {
+  private approachingConflict(inSegs: number[], c: Connector, filter: (seg: Segment) => boolean, range: number) {
     const { city } = this;
     for (const segId of inSegs) {
       const seg = city.segments[segId]!;
-      if (!axisFilter(seg.axis)) continue;
+      if (!filter(seg)) continue;
       if (this.anyApproaching(seg.lanes, c, range, false)) return true;
     }
     return false;
@@ -490,8 +490,8 @@ export class TrafficSystem {
         if (theirs.to === c.to || c.conflicts.includes(theirs.id)) {
           // Opposing traffic held by a red light does not count.
           const st = this.signalStates[theirs.node];
-          if (st && st.ns !== 'FLASHING') {
-            const asp = aspectFor(st, theirs.approach);
+          if (st && !isFlashing(st)) {
+            const asp = st.aspects[theirs.phase];
             if (asp !== 'GREEN' && asp !== 'AMBER') continue;
           }
           return true;

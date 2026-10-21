@@ -43,7 +43,7 @@ export class SimulationController {
   setLight(@Param('id', ParseIntPipe) id: number, @Body(new ZodPipe(LightControlInput)) input: LightControlInput) {
     if (!this.simulation.sim.setLight(id, input)) notFound('Traffic light');
     const detail = this.simulation.sim.lightDetail(id)!;
-    this.simulation.pushEvent({ id: `L${Date.now()}`, at: Date.now(), severity: 'info', title: `Светофор: ${detail.name}`, detail: `Режим ${detail.mode}, зелёный ${detail.greenNs}/${detail.greenEw} с` });
+    this.simulation.pushEvent({ id: `L${Date.now()}`, at: Date.now(), severity: 'info', title: `Светофор: ${detail.name}`, detail: `Режим ${detail.mode}, зелёный ${detail.phases.map((p) => p.green).join('/')} с` });
     return detail;
   }
 }

@@ -172,7 +172,8 @@ function LightCountdown({ nodeId, x, z }: { nodeId: number; x: number; z: number
         const secs = left < 0 ? '∞' : `${Math.max(0, Math.ceil(left - elapsed))} с`;
         return `<span style="display:inline-flex;align-items:center;gap:6px"><i style="width:9px;height:9px;border-radius:9px;background:${dot};box-shadow:0 0 8px ${dot}"></i>${label} ${secs}</span>`;
       };
-      el.innerHTML = part(st[0], st[2], 'С–Ю') + part(st[1], st[3], 'З–В');
+      const n = st.length / 2;
+      el.innerHTML = Array.from({ length: n }, (_, i) => part(st[i]!, st[n + i]!, `Ф${i + 1}`)).join('');
     };
     tick();
     return () => cancelAnimationFrame(raf);
