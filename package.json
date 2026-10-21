@@ -1,0 +1,26 @@
+{
+  "name": "kolo",
+  "version": "1.0.0",
+  "description": "Kolo — live isometric taxi fleet control (Belgrade demo)",
+  "private": true,
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "test": "turbo run test",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck"
+  },
+  "type": "module",
+  "packageManager": "pnpm@12.14.0",
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "version": "12.14.0",
+      "onFail": "download"
+    }
+  },
+  "devDependencies": {
+    "turbo": "2.11.9",
+    "typescript": "^6.0.3"
+  }
+}
