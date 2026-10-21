@@ -56,6 +56,8 @@ export interface Segment {
   rank: number;
   /** Signal phase of this approach at the end node (0 when unsignalised). */
   phase: number;
+  /** OSM layer: below 0 a tunnel, above 0 a bridge deck; 0 is street level. */
+  layer: number;
   /** Bus / trolleybus only: cars never route over it. */
   psvOnly?: boolean;
   /**
@@ -124,6 +126,8 @@ export interface RoadStrip {
   /** Metres to the left / right of the line in its point order. */
   left: number;
   right: number;
+  /** OSM layer: tunnels (below 0) are not drawn over the blocks above them. */
+  layer: number;
 }
 
 export interface Tree {

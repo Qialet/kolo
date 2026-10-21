@@ -69,13 +69,13 @@ export interface CurbHit {
   right: boolean;
 }
 
-/** Curb lanes where vehicles may stop: core network, not bus-only, not on a ring, long enough. */
+/** Curb lanes where vehicles may stop: core network at street level, not bus-only, not on a ring, long enough. */
 export class CurbIndex {
   private readonly grid = new SegmentGrid<{ lane: Lane; s0: number }>();
 
   constructor(private readonly city: City) {
     for (const seg of city.segments) {
-      if (!seg.core || seg.psvOnly || seg.rank >= RING_RANK) continue;
+      if (!seg.core || seg.psvOnly || seg.rank >= RING_RANK || seg.layer !== 0) continue;
       const lane = city.lanes[seg.lanes[seg.lanes.length - 1]!]!;
       if (lane.length < MIN_CURB_LANE) continue;
       const { points, cum } = lane.line;
@@ -144,6 +144,7 @@ export function buildingIndex(buildings: Pick<Building, 'id' | 'outline' | 'hole
 export function roadSurface(city: City): (p: Vec2, pad?: number) => boolean {
   const grid = new SegmentGrid<number>();
   for (const road of city.roads) {
+    if (road.layer < 0) continue;
     const half = Math.max(road.left, road.right);
     for (let i = 1; i < road.points.length; i++) grid.add(road.points[i - 1]!, road.points[i]!, half);
   }
@@ -286,7 +287,7 @@ export function parkCars(city: City) {
   const onRoad = roadSurface(city);
 
   for (const seg of city.segments) {
-    if (!seg.core || seg.psvOnly || seg.rank > 2) continue;
+    if (!seg.core || seg.psvOnly || seg.rank > 2 || seg.layer !== 0) continue;
     const street = city.streets[seg.street]!;
     const lane = city.lanes[seg.lanes[seg.lanes.length - 1]!]!;
     const spans = blocked.get(lane.id) ?? [];

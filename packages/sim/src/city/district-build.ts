@@ -227,6 +227,7 @@ export function buildCityFromDistrict(district: District): City {
         reverse: -1,
         rank: RANK[e.src.cls] + (e.src.roundabout ? RING_BONUS : 0),
         phase: 0,
+        layer: e.src.layer,
       };
       if (e.src.psvOnly) seg.psvOnly = true;
       city.segments.push(seg);
@@ -404,7 +405,7 @@ function roadStrip(e: WorkEdge): RoadStrip {
   const w = laneWidthOf(e.src.cls);
   const twoWay = e.lanesFwd > 0 && e.lanesBwd > 0;
   const half = ((e.lanesFwd + e.lanesBwd) * w) / 2;
-  return { points: e.pts, left: twoWay ? e.lanesBwd * w : half, right: twoWay ? e.lanesFwd * w : half };
+  return { points: e.pts, left: twoWay ? e.lanesBwd * w : half, right: twoWay ? e.lanesFwd * w : half, layer: e.src.layer };
 }
 
 /** Largest set of segments that cars can drive between in both directions without leaving the map. */

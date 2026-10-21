@@ -26,6 +26,17 @@ describe('places on the real city', () => {
     }
   });
 
+  it('never puts a pick-up point in a tunnel or on a bridge deck', () => {
+    for (const a of city.addresses) expect(city.segments[city.lanes[a.lane]!.seg]!.layer, a.label).toBe(0);
+    for (const d of city.depots) expect(city.segments[city.lanes[d.curb.lane]!.seg]!.layer).toBe(0);
+    const tunnels = city.segments.filter((s) => s.layer < 0);
+    expect(tunnels.length).toBeGreaterThan(0);
+    // Parked cars stay off the lanes of tunnels too.
+    for (const car of city.parkedCars) {
+      for (const s of tunnels) for (const l of s.lanes) for (const p of city.lanes[l]!.line.points) expect(dist(car, p)).toBeGreaterThan(4);
+    }
+  });
+
   it('keeps most addresses on their own street and on the house side', () => {
     const plain = city.addresses.filter((a) => !a.poi);
     const sameStreet = plain.filter((a) => a.label.startsWith(`${city.streets[a.street]!.name} `));

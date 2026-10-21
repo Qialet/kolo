@@ -184,6 +184,8 @@ export function buildGroundGeometry(city: City) {
 export function buildRoadGeometry(city: City) {
   const parts: THREE.BufferGeometry[] = [];
   for (const r of city.roads) {
+    // Tunnels run under the blocks: drawing them on the ground would cut through courtyards.
+    if (r.layer < 0) continue;
     const g = ribbon(r.points, r.left, r.right, LEVEL.road, palette.asphalt);
     if (g) parts.push(g);
   }
@@ -210,6 +212,7 @@ function dashes(parts: THREE.BufferGeometry[], lane: Lane, lateral: number, dash
 export function buildMarkingsGeometry(city: City) {
   const parts: THREE.BufferGeometry[] = [];
   for (const seg of city.segments) {
+    if (seg.layer < 0) continue;
     const lanes = seg.lanes.map((l) => city.lanes[l]!);
     const w = laneWidth(city, lanes[0]!);
     // Centre line once per two-way pair, on the left edge of the inner lane.
