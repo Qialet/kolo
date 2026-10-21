@@ -1,12 +1,16 @@
 'use client';
 
 import { BusIcon, CarTaxiFrontIcon, MapPinIcon, ReceiptTextIcon, WarehouseIcon } from 'lucide-react';
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { CommandDialog, Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { getCity } from '@/lib/city';
 import { frameBuffer, useLive } from '@/lib/live';
 import { useVehicles } from '@/lib/queries';
+import { searchItems } from '@/lib/search';
 import { useUi } from '@/lib/ui-store';
+
+/** Rows per group: thousands of real addresses would make the palette sluggish. */
+const LIMIT = 50;
 
 /** Ctrl/⌘+K palette: taxis, live orders, depots, stops and addresses. */
 export function CommandSearch({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
@@ -15,7 +19,13 @@ export function CommandSearch({ open, onOpenChange }: { open: boolean; onOpenCha
   const select = useUi((s) => s.select);
   const focus = useUi((s) => s.focus);
   const city = getCity();
-  const addresses = useMemo(() => city.addresses.slice().sort((a, b) => a.label.localeCompare(b.label, 'sr', { numeric: true })), [city]);
+  const sorted = useMemo(() => city.addresses.slice().sort((a, b) => a.label.localeCompare(b.label, 'sr', { numeric: true })), [city]);
+  const [query, setQuery] = useState('');
+  const taxis = searchItems(vehicles.data ?? [], query, (v) => `${v.plate} ${v.driverName ?? ''} ${v.id}`, LIMIT);
+  const liveOrders = searchItems(Object.values(orders), query, (o) => `${o.code} ${o.pickup.label} ${o.dropoff.label} ${o.passengerName}`, LIMIT);
+  const depots = searchItems(city.depots, query, (d) => `${d.name} ${d.id} парк`, LIMIT);
+  const stops = searchItems(city.busStops, query, (s) => `остановка ${s.name}`, LIMIT);
+  const addresses = searchItems(sorted, query, (a) => a.label, LIMIT);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -35,12 +45,12 @@ export function CommandSearch({ open, onOpenChange }: { open: boolean; onOpenCha
 
   return (
     <CommandDialog open={open} onOpenChange={onOpenChange} title="Поиск" description="Такси, заказы, парки, адреса">
-      <Command>
-        <CommandInput placeholder="Номер такси, водитель, код заказа, адрес…" />
+      <Command shouldFilter={false}>
+        <CommandInput placeholder="Номер такси, водитель, код заказа, адрес…" value={query} onValueChange={setQuery} />
         <CommandList className="max-h-[420px]">
           <CommandEmpty>Ничего не найдено</CommandEmpty>
           <CommandGroup heading="Такси">
-            {vehicles.data?.map((v) => (
+            {taxis.map((v) => (
               <CommandItem
                 key={v.id}
                 value={`${v.plate} ${v.driverName ?? ''} ${v.id}`}
@@ -59,7 +69,7 @@ export function CommandSearch({ open, onOpenChange }: { open: boolean; onOpenCha
             ))}
           </CommandGroup>
           <CommandGroup heading="Активные заказы">
-            {Object.values(orders).map((o) => (
+            {liveOrders.map((o) => (
               <CommandItem key={o.id} value={`${o.code} ${o.pickup.label} ${o.dropoff.label} ${o.passengerName}`} onSelect={() => go(() => (select({ kind: 'order', id: o.id }), focus(o.pickup.x, o.pickup.z, { zoom: 6 })))}>
                 <ReceiptTextIcon />
                 {o.code}
@@ -68,21 +78,23 @@ export function CommandSearch({ open, onOpenChange }: { open: boolean; onOpenCha
             ))}
           </CommandGroup>
           <CommandGroup heading="Таксопарки">
-            {city.depots.map((d) => (
+            {depots.map((d) => (
               <CommandItem key={d.id} value={`${d.name} ${d.id} парк`} onSelect={() => go(() => (select({ kind: 'depot', id: d.id }), focus(d.yard.x, d.yard.z, { zoom: 5 })))}>
                 <WarehouseIcon />
                 {d.name}
               </CommandItem>
             ))}
           </CommandGroup>
+          {stops.length > 0 && (
           <CommandGroup heading="Остановки">
-            {city.busStops.map((s) => (
+            {stops.map((s) => (
               <CommandItem key={s.id} value={`остановка ${s.name}`} onSelect={() => go(() => (select({ kind: 'stop', id: s.id }), focus(s.x, s.z, { zoom: 8 })))}>
                 <BusIcon />
                 {s.name}
               </CommandItem>
             ))}
           </CommandGroup>
+          )}
           <CommandGroup heading="Адреса">
             {addresses.map((a) => (
               <CommandItem

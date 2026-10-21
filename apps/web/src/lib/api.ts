@@ -38,7 +38,7 @@ export interface SimState {
   paused: boolean;
   trafficDensity: number;
   demand: number;
-  citySeed: number;
+  districtVersion: string;
 }
 
 export const api = {

@@ -1,9 +1,12 @@
 'use client';
 
 import dynamic from 'next/dynamic';
+import type { City } from '@kolo/sim';
 import { useEffect, useState } from 'react';
+import { toast } from 'sonner';
 import { SceneLabels } from '@/components/scene/scene-labels';
-import { connectLive, frameBuffer } from '@/lib/live';
+import { loadCity } from '@/lib/city';
+import { connectLive, frameBuffer, useLive } from '@/lib/live';
 import { useUi } from '@/lib/ui-store';
 import { cn } from '@/lib/utils';
 import { CommandSearch } from './command-search';
@@ -20,17 +23,62 @@ const CityCanvas = dynamic(() => import('@/components/scene/city-canvas'), {
   loading: () => <div className="grid size-full place-items-center text-sm text-muted-foreground">Строим Белград…</div>,
 });
 
+/** Loads the district file in the browser; the console renders once the city is built. */
+function useDistrictCity() {
+  const [state, setState] = useState<{ city: City | null; error: string | null }>({ city: null, error: null });
+  useEffect(() => {
+    let alive = true;
+    loadCity().then(
+      (city) => alive && setState({ city, error: null }),
+      (e: unknown) => alive && setState({ city: null, error: e instanceof Error ? e.message : String(e) }),
+    );
+    return () => {
+      alive = false;
+    };
+  }, []);
+  return state;
+}
+
+/** Offers a reload when the server simulates another version of the district than this tab drew. */
+function useDistrictVersionCheck(city: City | null) {
+  const serverVersion = useLive((s) => s.districtVersion);
+  useEffect(() => {
+    if (!city || !serverVersion || serverVersion === city.version) return;
+    toast('Карта обновилась на сервере', {
+      id: 'district-version',
+      description: 'Перезагрузите страницу, чтобы машины ехали по той же карте.',
+      duration: Infinity,
+      action: { label: 'Перезагрузить', onClick: () => window.location.reload() },
+    });
+  }, [city, serverVersion]);
+}
+
+const BACKDROP = 'relative h-dvh w-full overflow-hidden bg-[radial-gradient(120%_90%_at_50%_10%,#F4F7FB_0%,#E3E9F1_60%,#D9E0EA_100%)]';
+
 /** Full-screen live city with floating control panels. */
 export function LiveConsole() {
-  const [searchOpen, setSearchOpen] = useState(false);
-  const selected = useUi((s) => s.selection !== null);
+  const { city, error } = useDistrictCity();
+  useDistrictVersionCheck(city);
   useEffect(() => {
     connectLive();
     // Handle for automated visual checks (screenshots) in development.
     if (process.env.NODE_ENV !== 'production') Object.assign(window, { __koloUi: useUi, __koloFrames: frameBuffer });
   }, []);
+  if (!city) {
+    return (
+      <main className={cn(BACKDROP, 'grid place-items-center text-sm text-muted-foreground')}>
+        {error ? `Не удалось загрузить карту района: ${error}` : 'Строим Белград…'}
+      </main>
+    );
+  }
+  return <ConsoleBody />;
+}
+
+function ConsoleBody() {
+  const [searchOpen, setSearchOpen] = useState(false);
+  const selected = useUi((s) => s.selection !== null);
   return (
-    <main className="relative h-dvh w-full overflow-hidden bg-[radial-gradient(120%_90%_at_50%_10%,#F4F7FB_0%,#E3E9F1_60%,#D9E0EA_100%)]">
+    <main className={BACKDROP}>
       <div className="absolute inset-0">
         <CityCanvas />
         <SceneLabels />

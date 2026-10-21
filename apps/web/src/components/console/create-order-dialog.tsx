@@ -12,6 +12,7 @@ import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { api } from '@/lib/api';
 import { getCity } from '@/lib/city';
+import { searchItems } from '@/lib/search';
 import { useUi } from '@/lib/ui-store';
 
 interface PlaceOption {
@@ -38,7 +39,9 @@ function PlacePicker({ value, onChange, placeholder }: { value: string | null; o
   const places = usePlaces();
   const [open, setOpen] = useState(false);
   const current = places.find((p) => p.id === value);
+  const [query, setQuery] = useState('');
   const groups = ['Точки притяжения', 'Остановки', 'Адреса'] as const;
+  const found = groups.map((g) => ({ g, items: searchItems(places.filter((p) => p.group === g), query, (p) => p.label, 50) })).filter((x) => x.items.length);
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger render={<Button variant="outline" className="w-full justify-between font-normal" />}>
@@ -46,15 +49,13 @@ function PlacePicker({ value, onChange, placeholder }: { value: string | null; o
         <ChevronsUpDownIcon data-icon="inline-end" />
       </PopoverTrigger>
       <PopoverContent className="w-(--anchor-width) p-0">
-        <Command>
-          <CommandInput placeholder="Улица, номер, остановка…" />
+        <Command shouldFilter={false}>
+          <CommandInput placeholder="Улица, номер, остановка…" value={query} onValueChange={setQuery} />
           <CommandList>
             <CommandEmpty>Ничего не найдено</CommandEmpty>
-            {groups.map((g) => (
+            {found.map(({ g, items }) => (
               <CommandGroup key={g} heading={g}>
-                {places
-                  .filter((p) => p.group === g)
-                  .map((p) => (
+                {items.map((p) => (
                     <CommandItem
                       key={p.id}
                       value={`${p.label} ${p.id}`}

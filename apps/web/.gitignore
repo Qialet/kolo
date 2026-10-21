@@ -20,6 +20,9 @@
 # production
 /build
 
+# district files copied from data/districts (scripts/sync-districts.mjs)
+/public/districts/
+
 # misc
 .DS_Store
 *.pem

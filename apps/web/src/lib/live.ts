@@ -6,6 +6,7 @@ import {
   SocketEvent,
   type LiveEvent,
   type LiveFrame,
+  type LiveHello,
   type LiveKpi,
   type OrderSummary,
   type VehicleTuple,
@@ -115,6 +116,8 @@ interface LiveState {
   unread: number;
   /** Active orders keyed by id, updated from the socket. */
   orders: Record<string, OrderSummary>;
+  /** District version the server simulates (from the hello message). */
+  districtVersion: string | null;
   markRead: () => void;
 }
 
@@ -124,6 +127,7 @@ export const useLive = create<LiveState>((set) => ({
   events: [],
   unread: 0,
   orders: {},
+  districtVersion: null,
   markRead: () => set({ unread: 0 }),
 }));
 
@@ -146,6 +150,7 @@ export function connectLive() {
     );
   });
   socket.on('disconnect', () => useLive.setState({ connected: false }));
+  socket.on(SocketEvent.HELLO, (h: LiveHello) => useLive.setState({ districtVersion: h.version }));
   socket.on(SocketEvent.FRAME, (f: LiveFrame) => frameBuffer.push(f));
   socket.on(SocketEvent.KPI, (kpi: LiveKpi) => useLive.setState({ kpi }));
   socket.on(SocketEvent.EVENT, (e: LiveEvent) =>
