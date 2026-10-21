@@ -86,6 +86,8 @@ const KIND_LABEL: Record<string, string> = {
   'depot-office': 'Офис таксопарка',
   stall: 'Торговый павильон',
   kiosk: 'Киоск',
+  shed: 'Дворовые гаражи',
+  outbuilding: 'Дворовый флигель',
 };
 
 export function BuildingInspector({ id }: { id: string }) {

@@ -6,7 +6,7 @@ import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { palette } from '@/lib/palette';
 import { useUi } from '@/lib/ui-store';
-import { buildDepotMarkings, buildGroundGeometry, buildMarkingsGeometry, unitBuildingGeometry, withWindows } from './city-geometry';
+import { buildDepotMarkings, buildGroundGeometry, buildMarkingsGeometry, buildPlaygroundGeometry, unitBuildingGeometry, withWindows } from './city-geometry';
 
 const tmp = new THREE.Object3D();
 const color = new THREE.Color();
@@ -17,6 +17,7 @@ export function CityStatic({ city }: { city: City }) {
       <Ground city={city} />
       <Buildings city={city} />
       <Trees city={city} />
+      <Playgrounds city={city} />
       <Depots city={city} />
       <BusStops city={city} />
     </group>
@@ -57,6 +58,7 @@ const buildingTint = (b: Building) => {
   if (b.kind === 'depot-office') return '#E6E0FF';
   if (b.kind === 'poi') return palette.poiTint;
   if (b.kind === 'stall') return '#FFFFFF';
+  if (b.kind === 'shed') return palette.shed;
   return palette.buildingTints[b.tint % palette.buildingTints.length]!;
 };
 
@@ -105,6 +107,15 @@ function Buildings({ city }: { city: City }) {
       }}
       onPointerOut={() => hover(null)}
     />
+  );
+}
+
+function Playgrounds({ city }: { city: City }) {
+  const geometry = useMemo(() => buildPlaygroundGeometry(city), [city]);
+  return (
+    <mesh geometry={geometry} castShadow receiveShadow>
+      <meshStandardMaterial vertexColors roughness={0.8} />
+    </mesh>
   );
 }
 

@@ -50,6 +50,26 @@ describe('buildCity', () => {
     }
   });
 
+  it('furnishes courtyards without overlapping houses', () => {
+    const yardKinds = new Set(['shed', 'outbuilding']);
+    const yardBuildings = city.buildings.filter((b) => yardKinds.has(b.kind));
+    expect(yardBuildings.length).toBeGreaterThan(30);
+    expect(city.playgrounds.length).toBeGreaterThan(20);
+    expect(city.lawns.length).toBeGreaterThan(100);
+    const rectOf = (o: { x: number; z: number; w: number; d: number }) => ({ x0: o.x - o.w / 2, x1: o.x + o.w / 2, z0: o.z - o.d / 2, z1: o.z + o.d / 2 });
+    const overlap = (a: ReturnType<typeof rectOf>, b: ReturnType<typeof rectOf>) => a.x0 < b.x1 - 0.01 && b.x0 < a.x1 - 0.01 && a.z0 < b.z1 - 0.01 && b.z0 < a.z1 - 0.01;
+    const solid = city.buildings.map(rectOf);
+    for (const item of [...yardBuildings, ...city.playgrounds]) {
+      const r = rectOf(item);
+      const hits = city.buildings.filter((b) => b !== item && overlap(r, rectOf(b)));
+      expect(hits, `courtyard item at ${item.x},${item.z}`).toHaveLength(0);
+    }
+    for (const t of city.trees) {
+      const inside = solid.some((r) => t.x > r.x0 + 0.3 && t.x < r.x1 - 0.3 && t.z > r.z0 + 0.3 && t.z < r.z1 - 0.3);
+      expect(inside, `tree at ${t.x},${t.z}`).toBe(false);
+    }
+  });
+
   it('builds bus loops with stops on curb lanes', () => {
     expect(city.busLines).toHaveLength(3);
     for (const line of city.busLines) {

@@ -41,6 +41,7 @@ import type {
   CurbRef,
   Depot,
   Lane,
+  Playground,
   Poi,
   Segment,
   Slot,
@@ -100,6 +101,8 @@ export function buildCity(seed = DEFAULT_CITY_SEED): City {
     blocks: [],
     buildings: [],
     trees: [],
+    lawns: [],
+    playgrounds: [],
     addresses: [],
     depots: [],
     busStops: [],
@@ -452,7 +455,7 @@ function addBuilding(
   rect: Rect,
   kind: BuildingKind,
   h: number,
-  opts: { side?: Side; name?: string; poi?: string } = {},
+  opts: { side?: Side; name?: string; poi?: string; tint?: number } = {},
 ): Building {
   const id = `B${b.city.buildings.length + 1}`;
   const building: Building = {
@@ -463,7 +466,7 @@ function addBuilding(
     d: rect.z1 - rect.z0,
     h,
     kind,
-    tint: b.rng.int(0, 3),
+    tint: opts.tint ?? b.rng.int(0, 3),
     addressId: null,
     name: opts.name ?? null,
     blockId: ctx.block.id,
@@ -517,15 +520,23 @@ function fillPerimeter(b: Builder, ctx: BlockCtx) {
   }
   const z0 = inner.z0 + depthN + (depthN ? 1 : 0);
   const z1 = inner.z1 - depthS - (depthS ? 1 : 0);
+  const depthWE: Partial<Record<'W' | 'E', number>> = {};
   for (const side of ['W', 'E'] as const) {
     if (!ctx.sides[side]) continue;
     const depth = rng.range(12, 16);
+    depthWE[side] = depth;
     for (const [a0, a1] of frontages(b, z0, z1)) {
       const rect = side === 'W' ? { x0: inner.x0, x1: inner.x0 + depth, z0: a0, z1: a1 } : { x0: inner.x1 - depth, x1: inner.x1, z0: a0, z1: a1 };
       addBuilding(b, ctx, rect, kindAt(), heightFor(b, rect.x0, a0), { side });
     }
   }
-  // Courtyard trees.
+  const taken = furnishCourtyard(b, ctx, {
+    x0: inner.x0 + (depthWE.W ?? 0) + 2,
+    x1: inner.x1 - (depthWE.E ?? 0) - 2,
+    z0: z0 + 1.5,
+    z1: z1 - 1.5,
+  });
+  // Free-standing courtyard trees stay on the main stream so the street layout does not move.
   const cx0 = inner.x0 + 22;
   const cx1 = inner.x1 - 22;
   const cz0 = inner.z0 + 22;
@@ -533,9 +544,125 @@ function fillPerimeter(b: Builder, ctx: BlockCtx) {
   if (cx1 > cx0 && cz1 > cz0) {
     const n = rng.int(2, 6);
     for (let i = 0; i < n; i++) {
-      b.city.trees.push({ x: rng.range(cx0, cx1), z: rng.range(cz0, cz1), r: rng.range(2.6, 4.2), h: rng.range(6, 10) });
+      const tree = { x: rng.range(cx0, cx1), z: rng.range(cz0, cz1), r: rng.range(2.6, 4.2), h: rng.range(6, 10) };
+      if (!taken.some((r) => insideRect(tree, r, tree.r * 0.6))) b.city.trees.push(tree);
     }
   }
+}
+
+const insideRect = (p: Vec2, r: Rect, pad = 0) => p.x > r.x0 - pad && p.x < r.x1 + pad && p.z > r.z0 - pad && p.z < r.z1 + pad;
+const insetRect = (r: Rect, k: number): Rect => ({ x0: r.x0 + k, x1: r.x1 - k, z0: r.z0 + k, z1: r.z1 - k });
+
+type CellRole = 'lawn' | 'playground' | 'sheds' | 'paved';
+interface YardCell {
+  rect: Rect;
+  col: number;
+  row: number;
+  role: CellRole;
+}
+
+/**
+ * Fills a courtyard with a grid of cells separated by walkways: lawns with trees, at most one
+ * playground, a row of garages or a small two-storey outbuilding against the backs of the houses.
+ * Uses its own random stream so decorations never shift the street-facing layout.
+ * Returns the rectangles that free-standing trees must avoid.
+ */
+function furnishCourtyard(b: Builder, ctx: BlockCtx, yard: Rect): Rect[] {
+  const { city } = b;
+  const w = yard.x1 - yard.x0;
+  const d = yard.z1 - yard.z0;
+  if (w < 18 || d < 18) return [];
+  const rng = createRng(Math.round(city.seed * 7919 + yard.x0 * 131 + yard.z0 * 37));
+  const cols = Math.max(1, Math.round(w / 26));
+  const rows = Math.max(1, Math.round(d / 26));
+  const cw = w / cols;
+  const cd = d / rows;
+  const cells: YardCell[] = [];
+  for (let c = 0; c < cols; c++) {
+    for (let r = 0; r < rows; r++) {
+      const rect = { x0: yard.x0 + c * cw, x1: yard.x0 + (c + 1) * cw, z0: yard.z0 + r * cd, z1: yard.z0 + (r + 1) * cd };
+      cells.push({ rect, col: c, row: r, role: rng.chance(0.18) ? 'paved' : 'lawn' });
+    }
+  }
+  const free = (filter: (cell: YardCell) => boolean) => {
+    const options = cells.filter((cell) => cell.role !== 'playground' && cell.role !== 'sheds' && filter(cell));
+    return options.length ? rng.pick(options) : undefined;
+  };
+  const onEdge = (cell: YardCell) => cell.col === 0 || cell.row === 0 || cell.col === cols - 1 || cell.row === rows - 1;
+  if (cells.length >= 2 && cw >= 18 && cd >= 15 && rng.chance(0.8)) free(() => true)!.role = 'playground';
+  const shedRows = cells.length >= 4 ? rng.int(1, 2) : cells.length >= 2 && rng.chance(0.5) ? 1 : 0;
+  for (let i = 0; i < shedRows; i++) {
+    const cell = free(onEdge);
+    if (cell) cell.role = 'sheds';
+  }
+
+  const taken: Rect[] = [];
+  const plantTrees = (area: Rect, n: number) => {
+    for (let i = 0; i < n; i++) {
+      const r = rng.range(2.2, 3.6);
+      const inner = insetRect(area, r * 0.8);
+      if (inner.x1 <= inner.x0 || inner.z1 <= inner.z0) return;
+      const tree = { x: rng.range(inner.x0, inner.x1), z: rng.range(inner.z0, inner.z1), r, h: rng.range(5.5, 9.5) };
+      if (taken.some((t) => insideRect(tree, t, r * 0.6)) || city.trees.some((t) => dist(t, tree) < (t.r + r) * 0.7)) continue;
+      city.trees.push(tree);
+    }
+  };
+
+  for (const cell of cells) {
+    const area = insetRect(cell.rect, 1.6);
+    const aw = area.x1 - area.x0;
+    const ad = area.z1 - area.z0;
+    if (cell.role === 'playground') {
+      city.lawns.push(area);
+      const alongX = aw >= ad;
+      const pw = Math.min(alongX ? 15 : 11, aw - 4);
+      const pd = Math.min(alongX ? 11 : 15, ad - 4);
+      const cx = (area.x0 + area.x1) / 2;
+      const cz = (area.z0 + area.z1) / 2;
+      const pad: Playground = { x: cx, z: cz, w: pw, d: pd, variant: rng.int(0, 2) };
+      city.playgrounds.push(pad);
+      taken.push({ x0: cx - pw / 2, x1: cx + pw / 2, z0: cz - pd / 2, z1: cz + pd / 2 });
+      plantTrees(area, 3);
+    } else if (cell.role === 'sheds') {
+      // Against the courtyard edge the cell touches, i.e. behind the street-facing houses.
+      const side: Side = cell.row === 0 ? 'N' : cell.row === rows - 1 ? 'S' : cell.col === 0 ? 'W' : 'E';
+      const two = rng.chance(0.4);
+      const depth = two ? rng.range(7, 9) : 5.6;
+      const horizontal = side === 'N' || side === 'S';
+      const span = horizontal ? aw : ad;
+      const length = Math.min(span, two ? rng.range(9, 13) : rng.int(3, 6) * 3.4);
+      const start = rng.range(0, Math.max(0, span - length));
+      const rect: Rect = horizontal
+        ? {
+            x0: area.x0 + start,
+            x1: area.x0 + start + length,
+            z0: side === 'N' ? cell.rect.z0 : cell.rect.z1 - depth,
+            z1: side === 'N' ? cell.rect.z0 + depth : cell.rect.z1,
+          }
+        : {
+            x0: side === 'W' ? cell.rect.x0 : cell.rect.x1 - depth,
+            x1: side === 'W' ? cell.rect.x0 + depth : cell.rect.x1,
+            z0: area.z0 + start,
+            z1: area.z0 + start + length,
+          };
+      addBuilding(b, ctx, rect, two ? 'outbuilding' : 'shed', two ? rng.range(6, 6.8) : rng.range(2.6, 3.1), { tint: rng.int(0, 3) });
+      taken.push(rect);
+      // The rest of the cell becomes a strip of lawn.
+      const rest: Rect = horizontal
+        ? { ...area, z0: side === 'N' ? rect.z1 + 2 : area.z0, z1: side === 'N' ? area.z1 : rect.z0 - 2 }
+        : { ...area, x0: side === 'W' ? rect.x1 + 2 : area.x0, x1: side === 'W' ? area.x1 : rect.x0 - 2 };
+      if (rest.x1 - rest.x0 > 4 && rest.z1 - rest.z0 > 4) {
+        city.lawns.push(rest);
+        plantTrees(rest, rng.int(1, 2));
+      }
+    } else if (cell.role === 'lawn') {
+      city.lawns.push(area);
+      plantTrees(area, rng.int(2, 5));
+    } else {
+      plantTrees(area, rng.int(0, 1));
+    }
+  }
+  return taken;
 }
 
 function fillPark(b: Builder, ctx: BlockCtx) {

@@ -86,7 +86,7 @@ export interface Connector {
   conflicts: number[];
 }
 
-export type BuildingKind = 'residential' | 'office' | 'poi' | 'garage' | 'depot-office' | 'stall' | 'kiosk';
+export type BuildingKind = 'residential' | 'office' | 'poi' | 'garage' | 'depot-office' | 'stall' | 'kiosk' | 'shed' | 'outbuilding';
 
 export interface Building {
   id: string;
@@ -108,6 +108,17 @@ export interface Tree {
   z: number;
   r: number;
   h: number;
+}
+
+/** Courtyard playground: a soft pad with a sandbox, swings and a climbing frame. */
+export interface Playground {
+  x: number;
+  z: number;
+  /** Size along x / z. */
+  w: number;
+  d: number;
+  /** Equipment arrangement (0..2). */
+  variant: number;
 }
 
 export interface CurbRef {
@@ -195,6 +206,9 @@ export interface City {
   blocks: Block[];
   buildings: Building[];
   trees: Tree[];
+  /** Courtyard lawns (raised green patches). */
+  lawns: Rect[];
+  playgrounds: Playground[];
   addresses: Address[];
   depots: Depot[];
   busStops: BusStop[];

@@ -62,6 +62,8 @@ export function buildGroundGeometry(city: City) {
   }
   // Partner yards: asphalt with a violet tint, slightly above the courtyard level.
   for (const depot of city.depots) parts.push(rectSlab(depot.lot, 0.205, palette.depotLot));
+  // Courtyard lawns, a touch above the paved courtyard so walkways read between them.
+  for (const lawn of city.lawns) parts.push(rectSlab(lawn, 0.24, palette.lawn));
   for (const street of city.streets) {
     if (!street.median) continue;
     for (const seg of city.segments) {
@@ -144,6 +146,63 @@ export function buildDepotMarkings(city: City) {
         parts.push(quad(sideways ? 5 : 0.12, sideways ? 0.12 : 5, slot.x + ox, 0.2, slot.z + oz, palette.depot));
       }
     }
+  }
+  return parts.length ? merge(parts) : new THREE.BufferGeometry();
+}
+
+/** Box with a flat vertex colour, rotated around Z (tilt) and Y, bottom at y. */
+function part(w: number, h: number, d: number, color: string, x: number, y: number, z: number, rotY: number, tilt = 0) {
+  const g = new THREE.BoxGeometry(w, h, d);
+  if (tilt) g.rotateX(tilt);
+  g.translate(0, h / 2, 0);
+  g.rotateY(rotY);
+  g.translate(x, y, z);
+  const c = new THREE.Color(color);
+  const colors = new Float32Array(g.attributes.position!.count * 3);
+  for (let i = 0; i < colors.length; i += 3) colors.set([c.r, c.g, c.b], i);
+  g.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  return g;
+}
+
+/** Courtyard playgrounds: soft pad, sandbox, swings, a climbing tower with a slide and benches. */
+export function buildPlaygroundGeometry(city: City) {
+  const parts: THREE.BufferGeometry[] = [];
+  const base = 0.24;
+  for (const pg of city.playgrounds) {
+    const alongX = pg.w >= pg.d;
+    const long = alongX ? pg.w : pg.d;
+    const short = alongX ? pg.d : pg.w;
+    // Local frame: u along the long side, v across it; put() sizes are (across, height, along).
+    const rot = alongX ? Math.PI / 2 : 0;
+    const at = (u: number, v: number) => (alongX ? { x: pg.x + u, z: pg.z + v } : { x: pg.x + v, z: pg.z + u });
+    const put = (w: number, h: number, d: number, color: string, u: number, y: number, v: number, tilt = 0) => {
+      const p = at(u, v);
+      parts.push(part(w, h, d, color, p.x, base + y, p.z, rot, tilt));
+    };
+    parts.push(part(pg.w, 0.06, pg.d, palette.playPad, pg.x, base, pg.z, 0));
+    const slots = [-0.3, 0.02, 0.3].map((k) => k * long);
+    const order = [[0, 1, 2], [2, 0, 1], [1, 2, 0]][pg.variant % 3]!;
+    // Sandbox: low white border around sand.
+    const sand = slots[order[0]!]!;
+    put(3.2, 0.28, 3.2, palette.marking, sand, 0, 0);
+    put(2.7, 0.3, 2.7, palette.playSand, sand, 0, 0);
+    // Swings: two posts, a top bar and two seats (the frame runs across the pad).
+    const swing = slots[order[1]!]!;
+    for (const v of [-1.5, 1.5]) put(0.14, 2.4, 0.14, palette.playFrame, swing, 0, v);
+    put(3.1, 0.12, 0.12, palette.playFrame, swing, 2.3, 0);
+    for (const v of [-0.6, 0.6]) {
+      put(0.04, 1.6, 0.04, palette.playFrame, swing, 0.75, v);
+      put(0.5, 0.06, 0.4, palette.playSeat, swing, 0.7, v);
+    }
+    // Climbing tower with a roof and a slide down towards the pad edge.
+    const tower = slots[order[2]!]!;
+    put(1.8, 1.5, 1.8, palette.playFrame, tower, 0, -0.6);
+    put(2.1, 0.12, 2.1, palette.playSlide, tower, 1.5, -0.6);
+    put(1.2, 0.9, 1.2, palette.playSlide, tower, 1.62, -0.6);
+    const dir = tower > 0.5 ? -1 : 1;
+    put(0.8, 0.08, 3, palette.playSlide, tower + dir * 2.3, 0.75, -0.6, dir > 0 ? 0.45 : -0.45);
+    // Benches along the long sides.
+    for (const v of [-short / 2 + 0.5, short / 2 - 0.5]) put(0.45, 0.45, long * 0.18, palette.trunk, -long * 0.15 * Math.sign(v), 0, v);
   }
   return parts.length ? merge(parts) : new THREE.BufferGeometry();
 }
