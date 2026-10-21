@@ -1,0 +1,107 @@
+'use client';
+
+import { BusIcon, CarTaxiFrontIcon, MapPinIcon, ReceiptTextIcon, WarehouseIcon } from 'lucide-react';
+import { useEffect, useMemo } from 'react';
+import { CommandDialog, Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
+import { getCity } from '@/lib/city';
+import { frameBuffer, useLive } from '@/lib/live';
+import { useVehicles } from '@/lib/queries';
+import { useUi } from '@/lib/ui-store';
+
+/** Ctrl/⌘+K palette: taxis, live orders, depots, stops and addresses. */
+export function CommandSearch({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
+  const vehicles = useVehicles();
+  const orders = useLive((s) => s.orders);
+  const select = useUi((s) => s.select);
+  const focus = useUi((s) => s.focus);
+  const city = getCity();
+  const addresses = useMemo(() => city.addresses.slice().sort((a, b) => a.label.localeCompare(b.label, 'sr', { numeric: true })), [city]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        onOpenChange(!open);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open, onOpenChange]);
+
+  const go = (fn: () => void) => {
+    fn();
+    onOpenChange(false);
+  };
+
+  return (
+    <CommandDialog open={open} onOpenChange={onOpenChange} title="Поиск" description="Такси, заказы, парки, адреса">
+      <Command>
+        <CommandInput placeholder="Номер такси, водитель, код заказа, адрес…" />
+        <CommandList className="max-h-[420px]">
+          <CommandEmpty>Ничего не найдено</CommandEmpty>
+          <CommandGroup heading="Такси">
+            {vehicles.data?.map((v) => (
+              <CommandItem
+                key={v.id}
+                value={`${v.plate} ${v.driverName ?? ''} ${v.id}`}
+                onSelect={() =>
+                  go(() => {
+                    select({ kind: 'taxi', id: v.id });
+                    const p = frameBuffer.find(v.id);
+                    if (p) focus(p[2], p[3], { zoom: 8, follow: v.id });
+                  })
+                }
+              >
+                <CarTaxiFrontIcon />
+                {v.plate}
+                <span className="text-muted-foreground">{v.driverName}</span>
+              </CommandItem>
+            ))}
+          </CommandGroup>
+          <CommandGroup heading="Активные заказы">
+            {Object.values(orders).map((o) => (
+              <CommandItem key={o.id} value={`${o.code} ${o.pickup.label} ${o.dropoff.label} ${o.passengerName}`} onSelect={() => go(() => (select({ kind: 'order', id: o.id }), focus(o.pickup.x, o.pickup.z, { zoom: 6 })))}>
+                <ReceiptTextIcon />
+                {o.code}
+                <span className="truncate text-muted-foreground">{o.pickup.label}</span>
+              </CommandItem>
+            ))}
+          </CommandGroup>
+          <CommandGroup heading="Таксопарки">
+            {city.depots.map((d) => (
+              <CommandItem key={d.id} value={`${d.name} ${d.id} парк`} onSelect={() => go(() => (select({ kind: 'depot', id: d.id }), focus(d.yard.x, d.yard.z, { zoom: 5 })))}>
+                <WarehouseIcon />
+                {d.name}
+              </CommandItem>
+            ))}
+          </CommandGroup>
+          <CommandGroup heading="Остановки">
+            {city.busStops.map((s) => (
+              <CommandItem key={s.id} value={`остановка ${s.name}`} onSelect={() => go(() => (select({ kind: 'stop', id: s.id }), focus(s.x, s.z, { zoom: 8 })))}>
+                <BusIcon />
+                {s.name}
+              </CommandItem>
+            ))}
+          </CommandGroup>
+          <CommandGroup heading="Адреса">
+            {addresses.map((a) => (
+              <CommandItem
+                key={a.id}
+                value={a.label}
+                onSelect={() =>
+                  go(() => {
+                    if (a.buildingId) select({ kind: 'building', id: a.buildingId });
+                    focus(a.x, a.z, { zoom: 8 });
+                  })
+                }
+              >
+                <MapPinIcon />
+                {a.label}
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        </CommandList>
+      </Command>
+    </CommandDialog>
+  );
+}

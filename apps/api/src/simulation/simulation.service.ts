@@ -53,8 +53,10 @@ export class SimulationService implements OnModuleInit, OnApplicationBootstrap, 
         driverRating: v.driver?.rating ?? null,
       }))
       .sort((a, b) => Number(a.id.slice(1)) - Number(b.id.slice(1)));
+    const last = await orm.Order.orderBy((o) => o.code.desc()).select('code').first();
     this.sim = new Simulation(this.city, fleet, {
       seed: Date.now() % 100000,
+      lastOrderNumber: last ? Number(last.code.replace(/\D/g, '')) : 0,
       hooks: {
         onOrderCreated: (order, source) => this.enqueue(() => this.insertOrder(order, source)),
         onOrderEvent: (order, event, extra) => {

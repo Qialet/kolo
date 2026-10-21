@@ -12,7 +12,7 @@ export interface StreetSpec {
 }
 
 export const WORLD_HALF = 530;
-export const SIDEWALK = 3;
+export const SIDEWALK = 4.5;
 
 /** North–south streets, west to east. */
 export const NS_STREETS: StreetSpec[] = [

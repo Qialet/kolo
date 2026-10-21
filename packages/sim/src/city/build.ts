@@ -58,8 +58,9 @@ const KMH = 1 / 3.6;
 function makeStreet(id: number, spec: StreetSpec, axis: Axis): Street {
   const boulevard = spec.cls === 'boulevard';
   const lanesPerDir = boulevard ? 2 : 1;
-  const laneWidth = boulevard ? 3.25 : 3.5;
-  const median = boulevard ? 1 : 0;
+  // Slightly generous widths keep streets readable in the isometric view.
+  const laneWidth = boulevard ? 3.6 : 4;
+  const median = boulevard ? 1.4 : 0;
   return {
     id,
     name: spec.name,
@@ -441,7 +442,8 @@ function heightFor(b: Builder, x: number, z: number) {
   // Taller around the boulevard crossing, lower towards the edges.
   const d = Math.hypot(x + 10, z + 15);
   const t = Math.max(0, 1 - d / 650);
-  return 9 + t * 22 + b.rng.range(0, 8 + t * 10);
+  // Vračar perimeter blocks are 4–7 storeys; kept low so streets stay readable from above.
+  return 8 + t * 10 + b.rng.range(0, 5 + t * 6);
 }
 
 function addBuilding(
@@ -560,9 +562,9 @@ function fillPark(b: Builder, ctx: BlockCtx) {
 
 function fillPoi(b: Builder, ctx: BlockCtx, spec: Extract<SpecialBlock, { kind: 'poi' }>) {
   const { inner } = ctx.block;
-  const inset = spec.poi === 'station' ? 10 : 8;
+  const inset = spec.poi === 'hotel' ? 26 : 18;
   const rect = { x0: inner.x0 + inset, x1: inner.x1 - inset, z0: inner.z0 + inset, z1: inner.z1 - inset };
-  const h = spec.poi === 'hotel' ? 42 : spec.poi === 'mall' ? 24 : spec.poi === 'hospital' ? 30 : 18;
+  const h = spec.poi === 'hotel' ? 30 : spec.poi === 'mall' ? 15 : spec.poi === 'hospital' ? 19 : 12;
   const side: Side = ctx.sides.N ? 'N' : 'S';
   const building = addBuilding(b, ctx, rect, 'poi', h, { name: spec.name, poi: spec.poiId });
   const street = ctx.sides[side]!;

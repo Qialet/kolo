@@ -72,6 +72,8 @@ export interface SimulationOptions {
   trafficDensity?: number;
   /** Order rate multiplier. */
   demand?: number;
+  /** Last used order number, so codes stay unique across restarts. */
+  lastOrderNumber?: number;
   hooks?: SimHooks;
 }
 
@@ -171,6 +173,7 @@ export class Simulation {
     this.hooks = opts.hooks ?? {};
     this.trafficDensity = opts.trafficDensity ?? 0.6;
     this.demand = opts.demand ?? 1;
+    this.orderSeq = Math.max(10000, opts.lastOrderNumber ?? 0);
     this.traffic = new TrafficSystem(city);
     for (const a of city.addresses) this.places.set(a.id, { id: a.id, label: a.label, lane: a.lane, s: a.s, x: a.x, z: a.z });
     for (const st of city.busStops) {
