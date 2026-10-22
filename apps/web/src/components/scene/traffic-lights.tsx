@@ -141,6 +141,10 @@ export function TrafficLights({ city }: { city: City }) {
     for (const m of [red, amber, green, bars]) if (m.current?.instanceColor) m.current.instanceColor.needsUpdate = true;
   });
 
+  // Lamps are the roundest part of a junction: the far level takes a coarse sphere.
+  const lod = useUi((s) => s.lod);
+  const lamp = useMemo(() => ({ near: new THREE.SphereGeometry(0.26, 12, 8), far: new THREE.SphereGeometry(0.26, 6, 4) }), []);
+
   const onClick = (e: ThreeEvent<MouseEvent>) => {
     e.stopPropagation();
     const a = e.instanceId !== undefined ? approaches[e.instanceId] : undefined;
@@ -159,16 +163,13 @@ export function TrafficLights({ city }: { city: City }) {
         <boxGeometry args={[0.62, 2.0, 0.5]} />
         <meshStandardMaterial color="#2B303A" roughness={0.5} />
       </instancedMesh>
-      <instancedMesh ref={red} args={[undefined, undefined, n]} onClick={onClick}>
-        <sphereGeometry args={[0.26, 12, 8]} />
+      <instancedMesh ref={red} args={[lamp.near, undefined, n]} geometry={lod === 'far' ? lamp.far : lamp.near} onClick={onClick}>
         <meshBasicMaterial toneMapped={false} />
       </instancedMesh>
-      <instancedMesh ref={amber} args={[undefined, undefined, n]} onClick={onClick}>
-        <sphereGeometry args={[0.26, 12, 8]} />
+      <instancedMesh ref={amber} args={[lamp.near, undefined, n]} geometry={lod === 'far' ? lamp.far : lamp.near} onClick={onClick}>
         <meshBasicMaterial toneMapped={false} />
       </instancedMesh>
-      <instancedMesh ref={green} args={[undefined, undefined, n]} onClick={onClick}>
-        <sphereGeometry args={[0.26, 12, 8]} />
+      <instancedMesh ref={green} args={[lamp.near, undefined, n]} geometry={lod === 'far' ? lamp.far : lamp.near} onClick={onClick}>
         <meshBasicMaterial toneMapped={false} />
       </instancedMesh>
       <instancedMesh ref={bars} args={[undefined, undefined, n]}>

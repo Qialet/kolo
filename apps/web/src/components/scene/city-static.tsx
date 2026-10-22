@@ -2,10 +2,12 @@
 
 import type { ThreeEvent } from '@react-three/fiber';
 import type { City } from '@kolo/sim';
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { palette } from '@/lib/palette';
+import { chunkCells } from '@/lib/lod';
 import { useUi } from '@/lib/ui-store';
+import { ChunkedInstances, type InstancePart } from './chunked';
 import {
   buildBuildingGeometry,
   buildDepotGeometry,
@@ -23,7 +25,6 @@ import {
 } from './city-geometry';
 
 const tmp = new THREE.Object3D();
-const color = new THREE.Color();
 
 export function CityStatic({ city }: { city: City }) {
   return (
@@ -113,41 +114,40 @@ function Playgrounds({ city }: { city: City }) {
 }
 
 function Trees({ city }: { city: City }) {
-  const crowns = useRef<THREE.InstancedMesh>(null);
-  const trunks = useRef<THREE.InstancedMesh>(null);
-  useEffect(() => {
-    city.trees.forEach((t, i) => {
-      tmp.rotation.set(0, (i * 1.37) % Math.PI, 0);
-      tmp.position.set(t.x, LEVEL.ground + t.h * 0.62, t.z);
-      tmp.scale.set(t.r, t.h * 0.42, t.r);
-      tmp.updateMatrix();
-      crowns.current?.setMatrixAt(i, tmp.matrix);
-      color.set(i % 3 === 0 ? palette.treeDark : palette.tree);
-      crowns.current?.setColorAt(i, color);
-      tmp.position.set(t.x, LEVEL.ground + t.h * 0.2, t.z);
-      tmp.scale.set(0.22, t.h * 0.4, 0.22);
-      tmp.updateMatrix();
-      trunks.current?.setMatrixAt(i, tmp.matrix);
-    });
-    for (const m of [crowns.current, trunks.current]) {
-      if (!m) continue;
-      m.instanceMatrix.needsUpdate = true;
-      if (m.instanceColor) m.instanceColor.needsUpdate = true;
-      m.computeBoundingSphere();
-    }
+  const lod = useUi((s) => s.lod);
+  const cells = useMemo(() => chunkCells(city.trees), [city]);
+  const parts = useMemo((): InstancePart[] => {
+    const crown = new THREE.MeshStandardMaterial({ roughness: 0.9, flatShading: true });
+    const trunk = new THREE.MeshStandardMaterial({ color: palette.trunk, roughness: 1 });
+    const dark = new THREE.Color(palette.treeDark);
+    const light = new THREE.Color(palette.tree);
+    return [
+      {
+        near: new THREE.IcosahedronGeometry(1, 1),
+        far: new THREE.IcosahedronGeometry(1, 0),
+        material: crown,
+        castShadow: true,
+        place: (i, o) => {
+          const t = city.trees[i]!;
+          o.rotation.set(0, (i * 1.37) % Math.PI, 0);
+          o.position.set(t.x, LEVEL.ground + t.h * 0.62, t.z);
+          o.scale.set(t.r, t.h * 0.42, t.r);
+        },
+        color: (i, c) => c.copy(i % 3 === 0 ? dark : light),
+      },
+      {
+        near: new THREE.CylinderGeometry(1, 1, 1, 6),
+        far: null,
+        material: trunk,
+        place: (i, o) => {
+          const t = city.trees[i]!;
+          o.position.set(t.x, LEVEL.ground + t.h * 0.2, t.z);
+          o.scale.set(0.22, t.h * 0.4, 0.22);
+        },
+      },
+    ];
   }, [city]);
-  return (
-    <group>
-      <instancedMesh ref={crowns} args={[undefined, undefined, city.trees.length]} castShadow>
-        <icosahedronGeometry args={[1, 1]} />
-        <meshStandardMaterial roughness={0.9} flatShading />
-      </instancedMesh>
-      <instancedMesh ref={trunks} args={[undefined, undefined, city.trees.length]}>
-        <cylinderGeometry args={[1, 1, 1, 6]} />
-        <meshStandardMaterial color={palette.trunk} roughness={1} />
-      </instancedMesh>
-    </group>
-  );
+  return <ChunkedInstances cells={cells} parts={parts} lod={lod} />;
 }
 
 function Depots({ city }: { city: City }) {
@@ -228,39 +228,53 @@ function TrolleyWires({ city }: { city: City }) {
   );
 }
 
+/** Shelters of all stops as four instanced parts; a click on any part selects the stop. */
 function BusStops({ city }: { city: City }) {
   const select = useUi((s) => s.select);
+  const refs = useRef<(THREE.InstancedMesh | null)[]>([]);
+  const parts = useMemo(() => {
+    const at = (g: THREE.BufferGeometry, x: number, y: number, z: number) => g.translate(x, y, z);
+    return [
+      { geometry: at(new THREE.BoxGeometry(1.5, 0.14, 4.2), 0, 2.5, 0), material: new THREE.MeshStandardMaterial({ color: palette.bus, roughness: 0.5 }), castShadow: true },
+      { geometry: at(new THREE.BoxGeometry(0.08, 2.4, 3.8), -0.6, 1.25, 0), material: new THREE.MeshStandardMaterial({ color: '#DDE8FF', transparent: true, opacity: 0.65 }), castShadow: false },
+      { geometry: at(new THREE.CylinderGeometry(0.07, 0.07, 3.2, 6), 0.5, 1.6, -2.6), material: new THREE.MeshStandardMaterial({ color: palette.pole }), castShadow: false },
+      {
+        geometry: at(new THREE.BoxGeometry(0.7, 0.7, 0.12), 0.5, 3.2, -2.6),
+        material: new THREE.MeshStandardMaterial({ color: palette.bus, emissive: palette.bus, emissiveIntensity: 0.35 }),
+        castShadow: false,
+      },
+    ];
+  }, []);
+  useLayoutEffect(() => {
+    city.busStops.forEach((stop, i) => {
+      // Tram-only stops: the shelter stands on the platform; left of the track it turns round to face it.
+      tmp.position.set(stop.x, platformOf(city, stop) ? LEVEL.platform : LEVEL.ground, stop.z);
+      tmp.rotation.set(0, stop.heading + ((stop.platform ?? 0) < 0 ? Math.PI : 0), 0);
+      tmp.updateMatrix();
+      for (const m of refs.current) m?.setMatrixAt(i, tmp.matrix);
+    });
+    for (const m of refs.current) {
+      if (!m) continue;
+      m.instanceMatrix.needsUpdate = true;
+      m.computeBoundingSphere();
+    }
+  }, [city]);
   return (
     <group>
-      {city.busStops.map((stop) => (
-        <group
-          key={stop.id}
-          // Tram-only stops: the shelter stands on the platform.
-          position={[stop.x, platformOf(city, stop) ? LEVEL.platform : LEVEL.ground, stop.z]}
-          // On a platform left of the track the shelter turns round to face it.
-          rotation-y={stop.heading + ((stop.platform ?? 0) < 0 ? Math.PI : 0)}
+      {parts.map((p, k) => (
+        <instancedMesh
+          key={k}
+          ref={(m) => {
+            refs.current[k] = m;
+          }}
+          args={[p.geometry, p.material, city.busStops.length]}
+          castShadow={p.castShadow}
           onClick={(e) => {
             e.stopPropagation();
-            select({ kind: 'stop', id: stop.id });
+            const stop = e.instanceId !== undefined ? city.busStops[e.instanceId] : undefined;
+            if (stop) select({ kind: 'stop', id: stop.id });
           }}
-        >
-          <mesh position={[0, 2.5, 0]} castShadow>
-            <boxGeometry args={[1.5, 0.14, 4.2]} />
-            <meshStandardMaterial color={palette.bus} roughness={0.5} />
-          </mesh>
-          <mesh position={[-0.6, 1.25, 0]}>
-            <boxGeometry args={[0.08, 2.4, 3.8]} />
-            <meshStandardMaterial color="#DDE8FF" transparent opacity={0.65} />
-          </mesh>
-          <mesh position={[0.5, 1.6, -2.6]}>
-            <cylinderGeometry args={[0.07, 0.07, 3.2, 6]} />
-            <meshStandardMaterial color={palette.pole} />
-          </mesh>
-          <mesh position={[0.5, 3.2, -2.6]}>
-            <boxGeometry args={[0.7, 0.7, 0.12]} />
-            <meshStandardMaterial color={palette.bus} emissive={palette.bus} emissiveIntensity={0.35} />
-          </mesh>
-        </group>
+        />
       ))}
     </group>
   );

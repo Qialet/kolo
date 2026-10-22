@@ -3,7 +3,7 @@
 import { useFrame, type ThreeEvent } from '@react-three/fiber';
 import { TAXI_ACTIVITIES, VEHICLE_KINDS } from '@kolo/contracts';
 import type { City } from '@kolo/sim';
-import { useEffect, useMemo, useRef } from 'react';
+import { useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
@@ -11,7 +11,9 @@ import { frameBuffer, type VehiclePose } from '@/lib/live';
 import { palette } from '@/lib/palette';
 import { useVehicles } from '@/lib/queries';
 import { TramTrails, type TrailPose } from '@/lib/tram-trail';
+import { chunkCells } from '@/lib/lod';
 import { useUi } from '@/lib/ui-store';
+import { ChunkedInstances, type InstancePart } from './chunked';
 
 /** Latest interpolated poses by id, shared with overlays (labels, routes, camera follow). */
 export const livePoses = new Map<string, VehiclePose>();
@@ -48,6 +50,13 @@ const AT_PICKUP = TAXI_ACTIVITIES.indexOf('AT_PICKUP');
 
 function box(w: number, h: number, d: number, x: number, y: number, z: number, r = 0.15) {
   const g = new RoundedBoxGeometry(w, h, d, 2, r);
+  g.translate(x, y, z);
+  return g;
+}
+
+/** Box without rounded edges for the far level. */
+function plainBox(w: number, h: number, d: number, x: number, y: number, z: number) {
+  const g = new THREE.BoxGeometry(w, h, d);
   g.translate(x, y, z);
   return g;
 }
@@ -394,51 +403,39 @@ function withColors(count: number, color: string) {
   return new THREE.InstancedBufferAttribute(arr, 3);
 }
 
-/** Cars parked on local sidewalks: static, muted, not interactive. */
+/** Cars parked on local sidewalks: static, muted, not interactive; cut into chunks for culling. */
 export function ParkedCars({ city }: { city: City }) {
-  const g = useMemo(
-    () => ({
-      body: box(1.82, 0.66, 4.4, 0, 0.66, 0, 0.2),
-      cabin: box(1.52, 0.5, 2.1, 0, 1.18, -0.25, 0.18),
-      wheels: wheels(0.84, [-1.35, 1.35], 0.33),
-    }),
-    [],
-  );
-  const body = useRef<THREE.InstancedMesh>(null);
-  const cabin = useRef<THREE.InstancedMesh>(null);
-  const wheel = useRef<THREE.InstancedMesh>(null);
-  useEffect(() => {
+  const lod = useUi((s) => s.lod);
+  const cells = useMemo(() => chunkCells(city.parkedCars), [city]);
+  const parts = useMemo((): InstancePart[] => {
     const colors = palette.cars.map((x) => new THREE.Color(x).lerp(PARKED_DUST, 0.25));
-    city.parkedCars.forEach((car, i) => {
-      // Sidewalk level, same 15% upscale as moving vehicles.
-      tmp.position.set(car.x, -0.12, car.z);
-      tmp.rotation.set(0, car.heading, 0);
-      tmp.scale.setScalar(1.15);
-      tmp.updateMatrix();
-      for (const m of [body.current, cabin.current, wheel.current]) m?.setMatrixAt(i, tmp.matrix);
-      body.current?.setColorAt(i, colors[car.tint % colors.length]!);
-    });
-    for (const m of [body.current, cabin.current, wheel.current]) {
-      if (!m) continue;
-      m.instanceMatrix.needsUpdate = true;
-      if (m.instanceColor) m.instanceColor.needsUpdate = true;
-      m.computeBoundingSphere();
-    }
+    // Sidewalk level, same 15% upscale as moving vehicles.
+    const place = (i: number, o: THREE.Object3D) => {
+      const car = city.parkedCars[i]!;
+      o.position.set(car.x, -0.12, car.z);
+      o.rotation.set(0, car.heading, 0);
+      o.scale.setScalar(1.15);
+    };
+    return [
+      {
+        near: box(1.82, 0.66, 4.4, 0, 0.66, 0, 0.2),
+        far: plainBox(1.82, 0.66, 4.4, 0, 0.66, 0),
+        material: new THREE.MeshStandardMaterial({ roughness: 0.55 }),
+        castShadow: true,
+        receiveShadow: true,
+        place,
+        color: (i, c) => c.copy(colors[city.parkedCars[i]!.tint % colors.length]!),
+      },
+      {
+        near: box(1.52, 0.5, 2.1, 0, 1.18, -0.25, 0.18),
+        far: plainBox(1.52, 0.5, 2.1, 0, 1.18, -0.25),
+        material: new THREE.MeshStandardMaterial({ color: palette.glass, roughness: 0.3, metalness: 0.2 }),
+        place,
+      },
+      { near: wheels(0.84, [-1.35, 1.35], 0.33), far: null, material: new THREE.MeshStandardMaterial({ color: '#20232A', roughness: 0.8 }), place },
+    ];
   }, [city]);
-  const n = city.parkedCars.length;
-  return (
-    <group>
-      <instancedMesh ref={body} args={[g.body, undefined, n]} castShadow receiveShadow>
-        <meshStandardMaterial roughness={0.55} />
-      </instancedMesh>
-      <instancedMesh ref={cabin} args={[g.cabin, undefined, n]}>
-        <meshStandardMaterial color={palette.glass} roughness={0.3} metalness={0.2} />
-      </instancedMesh>
-      <instancedMesh ref={wheel} args={[g.wheels, undefined, n]}>
-        <meshStandardMaterial color="#20232A" roughness={0.8} />
-      </instancedMesh>
-    </group>
-  );
+  return <ChunkedInstances cells={cells} parts={parts} lod={lod} />;
 }
 
 function hashId(id: string) {
