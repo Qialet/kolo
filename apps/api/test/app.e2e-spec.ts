@@ -51,6 +51,22 @@ describe('Kolo API (e2e)', () => {
     await request(app.getHttpServer()).get('/api/sim/lines/nope').expect(404);
   });
 
+  it('describes tram lines and lists trams among the departures of a shared stop', async () => {
+    const service = app.get(SimulationService);
+    // A weekday afternoon, whatever the time the test runs.
+    service.sim.syncClock(Date.UTC(2026, 9, 22, 13, 30));
+    const line = service.city.busLines.find((l) => l.name === '2' && l.mode === 'tram')!;
+    const lineRes = await request(app.getHttpServer()).get(`/api/sim/lines/${line.id}`).expect(200);
+    expect(lineRes.body.mode).toBe('tram');
+    const stop = service.city.busStops.find((s) => s.name === 'Trg Slavija /Bulevar oslobođenja/' && s.rail)!;
+    const res = await request(app.getHttpServer()).get(`/api/sim/stops/${stop.id}`).expect(200);
+    const modes = new Map((res.body.lines as { id: string; mode: string }[]).map((l) => [l.id, l.mode]));
+    const departures = res.body.departures as { lineId: string }[];
+    expect(departures.some((d) => modes.get(d.lineId) === 'tram')).toBe(true);
+    expect(departures.some((d) => modes.get(d.lineId) !== 'tram')).toBe(true);
+    service.sim.syncClock();
+  });
+
   it('POST /api/sim/control {sync: true} returns the state', async () => {
     const res = await request(app.getHttpServer()).post('/api/sim/control').send({ sync: true }).expect(201);
     expect(res.body.districtVersion).toMatch(/^[0-9a-f]{8}$/);

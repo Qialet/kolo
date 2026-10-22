@@ -67,7 +67,7 @@
 ### Задача 6: контракты и API
 **Файлы:** packages/contracts live.ts и api.ts; apps/api simulation.service.ts; e2e.
 - BusDetail.kind и LineDetail.mode принимают TRAM и tram; StopDetail отдаёт отправления трамваев и автобусов вместе; описание кадра — бит 8 и передняя поза трамвая.
-- [ ] e2e: линия 2 — mode tram, у остановки Trg Slavija /Bulevar oslobođenja/ есть отправления трамвая; коммит feat(api): tram lines and departures.
+- [x] e2e: линия 2 — mode tram, у остановки Trg Slavija /Bulevar oslobođenja/ есть отправления трамвая; коммит feat(api): tram lines and departures.
 
 ### Задача 7: сцена — пути, контактная сеть, вагоны
 **Файлы:** scene/vehicles.tsx, city-static.tsx, city-geometry.ts, lib/palette.ts, docs/DESIGN.md.

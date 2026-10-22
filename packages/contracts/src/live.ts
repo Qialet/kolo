@@ -3,7 +3,8 @@ import type { FleetStatus, LightAspect, LightMode, OrderStatus, TaxiActivity, Ve
 /**
  * Compact per-vehicle tuple sent at 10 Hz:
  * [id, kindIndex, x, z, heading, speed m/s, activityIndex (taxi) | -1, flags]
- * flags bit 0 = braking, bit 1 = pulled over, bit 2 = has passenger.
+ * x, z: the middle of the vehicle, for a tram its front (its sections follow the track behind it).
+ * flags bit 0 = braking, bit 1 = pulled over, bit 2 = has passenger, bit 3 = long tram (CAF Urbos 3, else Tatra KT4).
  */
 export type VehicleTuple = [string, number, number, number, number, number, number, number];
 
