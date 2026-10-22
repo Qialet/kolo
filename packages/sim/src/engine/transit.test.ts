@@ -4,9 +4,11 @@ import { isTransitKind } from '@kolo/contracts';
 import type { District } from '../city/district.js';
 import { buildCityFromDistrict } from '../city/district-build.js';
 import { stopPickup } from '../city/transit-places.js';
+import { twinPos } from '../city/corridors.js';
 import { createRng } from '../rng.js';
+import { cycleOf } from './signals.js';
 import { Simulation, type FleetVehicleSeed } from './simulation.js';
-import { makeVehicle, TrafficSystem } from './traffic.js';
+import { makeVehicle, TrafficSystem, type Vehicle } from './traffic.js';
 import { serviceEpoch, Transit } from './transit.js';
 import { buildTransitNet } from './transit-net.js';
 
@@ -37,6 +39,33 @@ function fleet(n: number): FleetVehicleSeed[] {
 }
 
 const transitVehicles = (sim: Simulation) => sim.traffic.vehicles.filter((v) => isTransitKind(v.kind));
+const trams = (sim: Simulation) => sim.traffic.vehicles.filter((v) => v.kind === 'TRAM');
+const isRail = (lane: number) => !!city.segments[city.lanes[lane]!.seg]!.rail;
+/** Standing or driving in a lane (a tram at its stop stands in its lane too). */
+const inLane = (v: Vehicle) => v.mode === 'lane' || (v.mode === 'pulled' && v.pullOffset === 0);
+
+/** Pairs of vehicles on two lanes lying on top of each other whose bodies overlap there (and pairs checked). */
+function twinOverlaps(sim: Simulation): { overlaps: number; checks: number } {
+  const byLane = new Map<number, Vehicle[]>();
+  for (const v of sim.traffic.vehicles) if (inLane(v)) byLane.set(v.lane, [...(byLane.get(v.lane) ?? []), v]);
+  let overlaps = 0;
+  let checks = 0;
+  for (const [lane, list] of byLane) {
+    if (!isRail(lane)) continue;
+    for (const t of city.lanes[lane]!.twins ?? []) {
+      for (const tram of list) {
+        if (tram.s < t.s0 || tram.s - tram.length > t.s1) continue;
+        const front = twinPos(t, tram.s);
+        const back = twinPos(t, tram.s - tram.length);
+        for (const car of byLane.get(t.lane) ?? []) {
+          checks++;
+          if (car.s - car.length < front - 0.5 && car.s > back + 0.5) overlaps++;
+        }
+      }
+    }
+  }
+  return { overlaps, checks };
+}
 
 describe('timetable transit', () => {
   it('runs a weekday afternoon on the timetable', () => {
@@ -45,16 +74,33 @@ describe('timetable transit', () => {
     let overlaps = 0;
     let checks = 0;
     let ms = 0;
+    let maxTrams = 0;
     for (let i = 0; i < 600 * 20; i++) {
       const t0 = cpuMs();
       sim.step(0.05);
       ms += cpuMs() - t0;
       if (i % 100 !== 0) continue;
+      const shared = twinOverlaps(sim);
+      overlaps += shared.overlaps;
+      checks += shared.checks;
+      maxTrams = Math.max(maxTrams, trams(sim).length);
       const byLane = new Map<number, { s: number; len: number }[]>();
       for (const v of sim.traffic.vehicles) {
         expect(Number.isFinite(v.pose.x) && Number.isFinite(v.pose.z), v.id).toBe(true);
         if (isTransitKind(v.kind) && (v.mode === 'lane' || v.mode === 'conn')) expect(v.stoppedFor, v.id).toBeLessThan(180);
-        if (v.mode !== 'lane') continue;
+        if (v.kind === 'TRAM') {
+          const lanes = v.mode === 'conn' ? [sim.traffic.city.connectors[v.conn]!.from, sim.traffic.city.connectors[v.conn]!.to] : [v.lane];
+          for (const l of lanes) expect(isRail(l), v.id).toBe(true);
+          // At a red light a tram waits at most one cycle and a half minute.
+          if (v.mode === 'lane') {
+            const lane = city.lanes[v.lane]!;
+            const node = city.nodes[city.segments[lane.seg]!.to]!;
+            if (node.signal && lane.length - v.s < 10) expect(v.stoppedFor, v.id).toBeLessThanOrEqual(cycleOf(node.signal) + 30);
+          }
+        }
+        // Nobody is stuck on a lane shared with a track.
+        if (v.mode === 'lane' && city.lanes[v.lane]!.twins) expect(v.stoppedFor, v.id).toBeLessThan(120);
+        if (!inLane(v)) continue;
         const list = byLane.get(v.lane) ?? [];
         list.push({ s: v.s, len: v.length });
         byLane.set(v.lane, list);
@@ -69,12 +115,15 @@ describe('timetable transit', () => {
     }
     expect(sim.clock).toBe(WEEKDAY_1530 + 600_000);
     expect(transitVehicles(sim).length).toBeGreaterThanOrEqual(100);
-    const { servedStops, missedStops } = sim.transit.stats;
+    const { servedStops, missedStops, byMode } = sim.transit.stats;
     expect(servedStops / (servedStops + missedStops)).toBeGreaterThanOrEqual(0.9);
+    expect(byMode.tram.served / (byMode.tram.served + byMode.tram.missed)).toBeGreaterThanOrEqual(0.85);
+    expect(maxTrams).toBeGreaterThanOrEqual(20);
     expect(overlaps / Math.max(1, checks)).toBeLessThan(0.002);
-    expect(ms).toBeLessThan(6000);
-    // Trolleybuses and minibuses run as their own kinds.
-    expect(new Set(transitVehicles(sim).map((v) => v.kind))).toEqual(new Set(['BUS', 'TROLLEY', 'MINIBUS']));
+    expect(ms).toBeLessThan(7000);
+    // Trolleybuses, minibuses and trams run as their own kinds; trams are CAF and Tatra.
+    expect(new Set(transitVehicles(sim).map((v) => v.kind))).toEqual(new Set(['BUS', 'TROLLEY', 'MINIBUS', 'TRAM']));
+    expect(new Set(trams(sim).map((v) => v.length))).toEqual(new Set([19, 33]));
     expect(transitVehicles(sim).every((v) => /^B\d+$/.test(v.id))).toBe(true);
   });
 
@@ -143,6 +192,10 @@ describe('timetable transit', () => {
     expect(Math.abs(n - m) / m).toBeLessThanOrEqual(0.15);
     const ids = transitVehicles(sim).map((v) => v.id);
     expect(new Set(ids).size).toBe(ids.length);
+    expect(trams(sim).length).toBeGreaterThan(0);
+    expect(Math.abs(trams(sim).length - trams(fresh).length) / trams(fresh).length).toBeLessThanOrEqual(0.15);
+    for (const v of trams(sim)) expect(isRail(v.lane), v.id).toBe(true);
+    expect(twinOverlaps(sim).overlaps).toBe(0);
     expect([...sim.taxis.keys()]).toEqual(taxis);
     expect([...sim.orders.keys()]).toEqual(orders);
     // Nothing stands on top of anything after the rebuild.
@@ -151,6 +204,13 @@ describe('timetable transit', () => {
     for (const list of byLane.values()) {
       list.sort((a, b) => a - b);
       for (let k = 1; k < list.length; k++) expect(list[k]! - list[k - 1]!).toBeGreaterThan(7);
+    }
+    // Long trams included: no body reaches into the one behind.
+    const bodies = new Map<number, Vehicle[]>();
+    for (const v of transitVehicles(sim)) if (inLane(v)) bodies.set(v.lane, [...(bodies.get(v.lane) ?? []), v]);
+    for (const list of bodies.values()) {
+      list.sort((a, b) => a.s - b.s);
+      for (let k = 1; k < list.length; k++) expect(list[k]!.s - list[k]!.length, list[k]!.id).toBeGreaterThanOrEqual(list[k - 1]!.s - 0.5);
     }
   });
 

@@ -84,13 +84,20 @@ export function makeDriver(rng: Rng, kind: VehicleKind): DriverProfile {
 const TRAM_LONG = 33;
 const TRAM_SHORT = 19;
 
+/** Length of a vehicle kind built to one size (`long`: the CAF tram); null for private cars, which vary. */
+export function fixedLength(kind: VehicleKind, long = false): number | null {
+  if (kind === 'TRAM') return long ? TRAM_LONG : TRAM_SHORT;
+  if (kind === 'BUS' || kind === 'TROLLEY') return 12;
+  if (kind === 'MINIBUS') return 7.5;
+  return kind === 'TAXI' ? 4.6 : null;
+}
+
 /** `long` picks the long tram (CAF Urbos 3) over the Tatra KT4. */
 export function makeVehicle(id: string, kind: VehicleKind, rng: Rng, long = false): Vehicle {
   return {
     id,
     kind,
-    length:
-      kind === 'TRAM' ? (long ? TRAM_LONG : TRAM_SHORT) : kind === 'BUS' || kind === 'TROLLEY' ? 12 : kind === 'MINIBUS' ? 7.5 : kind === 'TAXI' ? 4.6 : rng.range(4.1, 4.9),
+    length: fixedLength(kind, long) ?? rng.range(4.1, 4.9),
     drv: makeDriver(rng, kind),
     mode: 'parked',
     lane: -1,
@@ -592,7 +599,8 @@ export class TrafficSystem {
       v.pose = p;
       return;
     }
-    const half = v.length / 2;
+    // A tram is drawn section by section from its front; everything else from its middle.
+    const half = v.kind === 'TRAM' ? 0 : v.length / 2;
     if (v.mode === 'conn') {
       const c = city.connectors[v.conn]!;
       const sc = v.s - half;

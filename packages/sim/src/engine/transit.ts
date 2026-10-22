@@ -4,7 +4,7 @@ import type { City } from '../city/types.js';
 import type { Rng } from '../rng.js';
 import { belgradeTime, serviceFor } from '../transit/calendar.js';
 import { chooseLanes, laneIndexesFor } from './routing.js';
-import { makeVehicle, type PathStep, type TrafficSystem, type Vehicle } from './traffic.js';
+import { fixedLength, makeVehicle, type PathStep, type TrafficSystem, type Vehicle } from './traffic.js';
 import type { NetPattern, TransitNet } from './transit-net.js';
 
 const KIND: Record<TransitMode, VehicleKind> = { bus: 'BUS', trolley: 'TROLLEY', minibus: 'MINIBUS', tram: 'TRAM' };
@@ -18,6 +18,10 @@ const LAST_STOP_LINGER = 20;
 const LATE = 60;
 const ENTRY_ROOM = 9;
 const PLACE_ROOM = 14;
+/** Share of trips run by the long CAF Urbos 3 trams; the rest are Tatra KT4. */
+const LONG_TRAMS = 0.4;
+/** Clear space in front of and behind a vehicle of this length being put on a lane. */
+const roomFor = (length: number, base: number) => Math.max(base, length + 4);
 const PLACE_STEP = 15;
 /** A vehicle this close to the end of its exit lane has left the map. */
 const EXIT_ROOM = 8;
@@ -92,7 +96,13 @@ interface Departure {
 export class Transit {
   readonly trips = new Map<string, Trip>();
   readonly byVehicle = new Map<string, Trip>();
-  readonly stats = { spawnedTrips: 0, missedTrips: 0, servedStops: 0, missedStops: 0 };
+  readonly stats = {
+    spawnedTrips: 0,
+    missedTrips: 0,
+    servedStops: 0,
+    missedStops: 0,
+    byMode: { bus: { served: 0, missed: 0 }, trolley: { served: 0, missed: 0 }, minibus: { served: 0, missed: 0 }, tram: { served: 0, missed: 0 } },
+  };
   private readonly city: City;
   private readonly departures = new Map<string, Departure[]>();
   private queue: ScheduledTrip[] = [];
@@ -116,8 +126,6 @@ export class Transit {
     if (list) return list;
     list = [];
     for (const pattern of this.net.patterns) {
-      // Trams join the timetable in plan 4, task 5.
-      if (pattern.mode === 'tram') continue;
       const first = pattern.stops[0]!.timeIdx;
       const last = pattern.stops[pattern.stops.length - 1]!.timeIdx;
       for (const profile of pattern.profiles) {
@@ -206,7 +214,7 @@ export class Transit {
   private launch(t: ScheduledTrip): boolean {
     const p = t.pattern;
     if (p.entryLane >= 0) {
-      if (!this.traffic.isLaneFree(p.entryLane, 0, ENTRY_ROOM)) return false;
+      if (!this.traffic.isLaneFree(p.entryLane, 0, roomFor(lengthOf(t), ENTRY_ROOM))) return false;
       const trip = this.create(t, 0, 'drive', 0);
       this.traffic.placeOnLane(trip.v, p.entryLane, 1);
       trip.v.speed = this.city.segments[this.city.lanes[p.entryLane]!.seg]!.speed * 0.5;
@@ -214,7 +222,7 @@ export class Transit {
       return true;
     }
     const stop = p.stops[0]!;
-    if (!this.traffic.isLaneFree(stop.lane, stop.s, PLACE_ROOM)) return false;
+    if (!this.traffic.isLaneFree(stop.lane, stop.s, roomFor(lengthOf(t), PLACE_ROOM))) return false;
     const trip = this.create(t, 1, 'dwell', p.stops[0]!.segIdx);
     trip.dwellUntil = this.departureAt(t, 0);
     this.traffic.placeOnLane(trip.v, stop.lane, stop.s, true);
@@ -222,7 +230,7 @@ export class Transit {
   }
 
   private create(t: ScheduledTrip, next: number, phase: TripPhase, segIdx: number): Trip {
-    const v = makeVehicle(`B${++this.seq}`, KIND[t.pattern.mode], this.rng);
+    const v = makeVehicle(`B${++this.seq}`, KIND[t.pattern.mode], this.rng, isLongTram(t));
     const trip: Trip = { ...t, id: v.id, v, phase, next, segIdx, dwellUntil: 0, delaySec: 0 };
     this.traffic.add(v);
     this.trips.set(t.key, trip);
@@ -283,6 +291,7 @@ export class Transit {
         } else if (berth === null || (v.stop && v.mode === 'lane' && v.lane === v.stop.lane && v.pathIdx === v.path.length - 1 && v.s > v.stop.s + 1)) {
           // Rolled past the stop, or it is full: skip it and go on to the next one.
           this.stats.missedStops++;
+          this.stats.byMode[p.mode].missed++;
           trip.segIdx = p.stops[trip.next]!.segIdx;
           trip.next++;
           if (trip.next >= p.stops.length && p.exitSeg < 0) this.finish(trip);
@@ -323,6 +332,7 @@ export class Transit {
     const k = trip.next;
     const last = k === trip.pattern.stops.length - 1;
     this.stats.servedStops++;
+    this.stats.byMode[trip.pattern.mode].served++;
     trip.segIdx = trip.pattern.stops[k]!.segIdx;
     trip.next++;
     trip.phase = 'dwell';
@@ -409,7 +419,7 @@ export class Transit {
       const lane = this.city.lanes[lanes[i]!]!;
       const s = Math.max(1, Math.min(lane.length - 1, at - p.segAt[startSeg + i]!));
       if (leg < n && i === lanes.length - 1 && s > p.stops[leg]!.s - 6) break;
-      if (!this.traffic.isLaneFree(lane.id, s, PLACE_ROOM)) continue;
+      if (!this.traffic.isLaneFree(lane.id, s, roomFor(lengthOf(t), PLACE_ROOM))) continue;
       const trip = this.create(t, leg, leg < n ? 'drive' : 'leave', startSeg);
       this.traffic.placeOnLane(trip.v, lane.id, s);
       trip.v.speed = this.city.segments[lane.seg]!.speed * 0.5;
@@ -421,12 +431,23 @@ export class Transit {
 
   private placeAtStop(t: ScheduledTrip, k: number, until: number) {
     const stop = t.pattern.stops[k]!;
-    if (!this.traffic.isLaneFree(stop.lane, stop.s, PLACE_ROOM)) return;
+    if (!this.traffic.isLaneFree(stop.lane, stop.s, roomFor(lengthOf(t), PLACE_ROOM))) return;
     const trip = this.create(t, k + 1, 'dwell', t.pattern.stops[k]!.segIdx);
     trip.dwellUntil = until;
     this.traffic.placeOnLane(trip.v, stop.lane, stop.s, true);
   }
 }
+
+/** Whether a trip runs a long tram: fixed by the trip itself, so it stays the same after a clock sync. */
+function isLongTram(t: ScheduledTrip): boolean {
+  if (t.pattern.mode !== 'tram') return false;
+  let h = 2166136261;
+  for (let i = 0; i < t.key.length; i++) h = Math.imul(h ^ t.key.charCodeAt(i), 16777619);
+  return (h >>> 0) / 4294967296 < LONG_TRAMS;
+}
+
+/** Length of the vehicle a trip will run. */
+const lengthOf = (t: ScheduledTrip) => fixedLength(KIND[t.pattern.mode], isLongTram(t))!;
 
 function lowerBound(list: Departure[], spawnS: number): number {
   let lo = 0;

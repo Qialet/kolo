@@ -33,7 +33,7 @@ import { createRng, type Rng } from '../rng.js';
 import { CANCEL_REASONS_PASSENGER, DISPUTE_REASONS, passengerName } from './names.js';
 import { cycleOf, signalState } from './signals.js';
 import { Roaming } from './roaming.js';
-import { makeVehicle, TrafficSystem, type Vehicle } from './traffic.js';
+import { fixedLength, makeVehicle, TrafficSystem, type Vehicle } from './traffic.js';
 import { Transit } from './transit.js';
 import { buildTransitNet, patternPoint, type NetPattern } from './transit-net.js';
 
@@ -881,7 +881,8 @@ export class Simulation {
     const vehicles: LiveFrame['vehicles'] = [];
     for (const v of this.traffic.vehicles) {
       const taxi = v.kind === 'TAXI' ? this.taxis.get(v.id) : undefined;
-      const flags = (v.acc < -1.2 ? 1 : 0) | (v.mode === 'pulled' ? 2 : 0) | (taxi?.activity === 'ON_TRIP' ? 4 : 0);
+      const flags =
+        (v.acc < -1.2 ? 1 : 0) | (v.mode === 'pulled' ? 2 : 0) | (taxi?.activity === 'ON_TRIP' ? 4 : 0) | (v.kind === 'TRAM' && v.length === fixedLength('TRAM', true) ? 8 : 0);
       vehicles.push([
         v.id,
         VEHICLE_KINDS.indexOf(v.kind),
