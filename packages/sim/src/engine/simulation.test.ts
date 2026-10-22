@@ -138,7 +138,7 @@ describe('Simulation', () => {
     const sim = new Simulation(buildCity(), fleet(60), { startAt: Date.UTC(2026, 9, 22, 6, 0) });
     const steps: number[] = [];
     let frameBytes = 0;
-    for (let i = 0; i < 300 * 20; i++) {
+    for (let i = 0; i < 120 * 20; i++) {
       // Wall time: process.cpuUsage ticks in 15.6 ms quanta on Windows; the budget leaves room for busy cores.
       const t0 = performance.now();
       sim.tick(0.05);

@@ -1,10 +1,16 @@
 // Frame probe: draw calls, triangles and frame time at fixed views of the running dev app.
-// Usage: pnpm perf [--cpu N] [--url http://localhost:3000]
+// Usage: pnpm perf [--budget] [--cpu N] [--url http://localhost:3000] [--api http://localhost:4000/api]
+// --budget fails (exit 1) when a view draws more than its budget; frame time depends on the machine and is only printed.
 import { createRequire } from 'node:module';
 import { parseArgs } from 'node:util';
 
 const { values: args } = parseArgs({
-  options: { cpu: { type: 'string' }, url: { type: 'string', default: 'http://localhost:3000' } },
+  options: {
+    budget: { type: 'boolean', default: false },
+    cpu: { type: 'string' },
+    url: { type: 'string', default: 'http://localhost:3000' },
+    api: { type: 'string', default: 'http://localhost:4000/api' },
+  },
 });
 const require = createRequire(new URL('../../../package.json', import.meta.url));
 const { chromium } = require('playwright-core');
@@ -12,6 +18,8 @@ const { chromium } = require('playwright-core');
 /** View: target x, z and zoom. */
 const VIEWS = { overview: [-499, -920, 0.8], home: [0, 0, 4.6], near: [-459, -1225, 12] };
 const FRAMES = 120;
+/** Most triangles and draw calls per frame (shadow pass included) a view may take. */
+const BUDGET = { overview: { triangles: 900_000, draws: 260 }, home: { triangles: 1_200_000, draws: 150 }, near: { triangles: 900_000, draws: 120 } };
 
 const browser = await chromium.launch({ channel: 'chrome', args: ['--use-angle=d3d11', '--enable-gpu', '--ignore-gpu-blocklist'] });
 const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
@@ -83,3 +91,11 @@ await browser.close();
 
 console.log(`${gpu}${args.cpu ? `, CPU ×${args.cpu}` : ''}`);
 console.table(rows);
+const state = await fetch(`${args.api}/sim/state`).then((r) => r.json()).catch(() => null);
+if (state?.step) console.log(`Server step over the last minute: avg ${state.step.avgMs} ms, max ${state.step.maxMs} ms (budget 16.7 ms)`);
+if (args.budget) {
+  const over = rows.filter((r) => r.triangles > BUDGET[r.view].triangles || r.draws > BUDGET[r.view].draws);
+  for (const r of over) console.error(`Over budget: ${r.view} — ${r.triangles} triangles, ${r.draws} draws (budget ${BUDGET[r.view].triangles}, ${BUDGET[r.view].draws})`);
+  if (over.length) process.exit(1);
+  console.log('Frame budget: ok');
+}
