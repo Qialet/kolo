@@ -140,17 +140,18 @@ function PoiLabels() {
   const city = getCity();
   const select = useUi((s) => s.select);
   const focus = useUi((s) => s.focus);
-  // Busier places only: the district has well over a hundred.
+  // Busier places only: the district has well over a hundred; from afar only the busiest.
+  const lod = useUi((s) => s.lod);
   const pois = useMemo(
     () =>
       city.pois
-        .filter((p) => p.weight >= 2)
+        .filter((p) => p.weight >= (lod === 'far' ? 3 : 2))
         .map((p) => {
           const buildingId = city.addressById.get(p.addressId)?.buildingId ?? null;
           const building = buildingId ? city.buildings.find((b) => b.id === buildingId) : undefined;
           return { ...p, buildingId: building?.id ?? null, y: (building?.h ?? 3) + 3 };
         }),
-    [city],
+    [city, lod],
   );
   return (
     <>

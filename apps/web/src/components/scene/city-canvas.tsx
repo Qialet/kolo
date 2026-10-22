@@ -1,7 +1,8 @@
 'use client';
 
 import { Canvas } from '@react-three/fiber';
-import { useMemo } from 'react';
+import { PerformanceMonitor } from '@react-three/drei';
+import { useMemo, useState } from 'react';
 import * as THREE from 'three';
 import { getCity } from '@/lib/city';
 import { useUi } from '@/lib/ui-store';
@@ -15,11 +16,13 @@ import { LabelProjector } from './world-labels';
 export default function CityCanvas() {
   const city = useMemo(() => getCity(), []);
   const select = useUi((s) => s.select);
+  // Full device resolution (up to 2) while frames keep up; one pixel per CSS pixel when they do not.
+  const [lowRes, setLowRes] = useState(false);
   return (
     <Canvas
       shadows
       orthographic
-      dpr={[1, 2]}
+      dpr={lowRes ? 1 : [1, 2]}
       camera={{ position: homeOf(city).add(HOME_OFFSET).toArray(), zoom: HOME_ZOOM, near: 1, far: 4000 }}
       gl={{ antialias: true, alpha: true, toneMapping: THREE.NeutralToneMapping }}
       onPointerMissed={() => select(null)}
@@ -27,6 +30,7 @@ export default function CityCanvas() {
         if (process.env.NODE_ENV !== 'production') Object.assign(window, { __koloGl: state });
       }}
     >
+      <PerformanceMonitor onDecline={() => setLowRes(true)} onIncline={() => setLowRes(false)} flipflops={3} onFallback={() => setLowRes(true)} />
       <SceneLights />
       <CameraRig />
       <CityStatic city={city} />

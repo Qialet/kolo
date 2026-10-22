@@ -11,6 +11,8 @@ export type Anchor = { x: number; y: number; z: number } | { follow: string; y: 
 /** DOM labels anchored to world positions. Lives outside React state on purpose. */
 const registry = new Map<HTMLElement, { current: Anchor }>();
 const v = new THREE.Vector3();
+/** Last transform written per label (empty when hidden): the DOM is touched only on change. */
+const written = new WeakMap<HTMLElement, string>();
 
 /** Inside the Canvas: projects every registered label once per frame. */
 export function LabelProjector() {
@@ -31,8 +33,11 @@ export function LabelProjector() {
       const x = ((v.x + 1) / 2) * size.width;
       const y = ((1 - v.y) / 2) * size.height;
       const off = x < -200 || y < -200 || x > size.width + 200 || y > size.height + 200;
+      const next = off ? '' : `translate3d(${x.toFixed(1)}px, ${y.toFixed(1)}px, 0)`;
+      if (written.get(el) === next) continue;
+      written.set(el, next);
       el.style.visibility = off ? 'hidden' : 'visible';
-      if (!off) el.style.transform = `translate3d(${x.toFixed(1)}px, ${y.toFixed(1)}px, 0)`;
+      if (!off) el.style.transform = next;
     }
   });
   return null;

@@ -6,7 +6,7 @@ import type { City } from '@kolo/sim';
 import { useEffect, useMemo, useRef, type ComponentRef } from 'react';
 import * as THREE from 'three';
 import { getCity } from '@/lib/city';
-import { nextLod } from '@/lib/lod';
+import { nextLod, shadowExtent } from '@/lib/lod';
 import { useUi } from '@/lib/ui-store';
 import { livePoses } from './vehicles';
 
@@ -128,15 +128,29 @@ export function CameraRig() {
   );
 }
 
-/** Sun that follows the camera target so the shadow map keeps its resolution. */
+/** Direction to the sun from the ground. */
+const SUN = new THREE.Vector3(-160, 300, 110).normalize();
+
+/** Sun that follows the camera target; its shadow square grows and shrinks with the view. */
 export function SceneLights() {
   const light = useRef<THREE.DirectionalLight>(null);
+  const extent = useRef(320);
   const controls = useThree((s) => s.controls) as MapControlsImpl | null;
-  useFrame(() => {
+  useFrame(({ camera, size }) => {
     const l = light.current;
     if (!l || !controls) return;
+    const want = shadowExtent(size.width, size.height, camera.zoom);
+    if (Math.abs(want - extent.current) > extent.current * 0.1) {
+      extent.current = want;
+      const cam = l.shadow.camera;
+      cam.left = cam.bottom = -want;
+      cam.right = cam.top = want;
+      // Far enough that the whole square's ground lies between near and far.
+      cam.far = 2 * (want + 300) + 100;
+      cam.updateProjectionMatrix();
+    }
     const t = controls.target;
-    l.position.set(t.x - 160, 300, t.z + 110);
+    l.position.copy(t).addScaledVector(SUN, extent.current + 300);
     l.target.position.copy(t);
     l.target.updateMatrixWorld();
   });

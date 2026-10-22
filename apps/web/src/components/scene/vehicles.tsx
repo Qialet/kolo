@@ -3,7 +3,7 @@
 import { useFrame, type ThreeEvent } from '@react-three/fiber';
 import { TAXI_ACTIVITIES, VEHICLE_KINDS } from '@kolo/contracts';
 import type { City } from '@kolo/sim';
-import { useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
@@ -32,6 +32,10 @@ const HALO_PULSE = 2.4;
 const KIND = Object.fromEntries(VEHICLE_KINDS.map((k, i) => [k, i])) as Record<(typeof VEHICLE_KINDS)[number], number>;
 
 const tmp = new THREE.Object3D();
+const view = new THREE.Frustum();
+const projView = new THREE.Matrix4();
+const sphere = new THREE.Sphere();
+const at = new THREE.Vector3();
 /** Moving instances: raycasting must not rely on a bounding sphere cached at first use. */
 const WORLD_SPHERE = new THREE.Sphere(new THREE.Vector3(0, 0, 0), 5000);
 const TAIL_ON = new THREE.Color('#FF2D3D');
@@ -95,7 +99,31 @@ function useGeometries() {
       minibus: coach(7.5, 2.3, [-2.4, 2.4], 0.42),
     };
     const tram = { ...coach(TRAM_MODEL, 2.45, [-2.5, 2.5], 0.36), Panto: pantograph() };
-    return { carBody, carCabin, carWheels, tails, sign, halo, transit, tram };
+    // Far level: plain boxes for the rounded bodies; wheels, tail lamps and pantographs are under a pixel there.
+    const flat = (length: number, height: number) => ({
+      Body: plainBox(2.5, height, length - 0.2, 0, 0.35 + height / 2, 0),
+      Glass: plainBox(2.56, 0.95, length - 0.8, 0, 0.35 + height - 0.8, 0.1),
+      Roof: plainBox(2.2, 0.16, length * 0.8, 0, 0.35 + height + 0.09, 0),
+      Wheels: null,
+      Tails: null,
+    });
+    const farBody = plainBox(1.82, 0.66, 4.4, 0, 0.66, 0);
+    const farCabin = plainBox(1.52, 0.5, 2.1, 0, 1.18, -0.25);
+    const far: Partial<Record<Part, THREE.BufferGeometry | null>> = {
+      taxiBody: farBody,
+      taxiCabin: farCabin,
+      taxiWheels: null,
+      taxiTails: null,
+      taxiSign: plainBox(0.78, 0.24, 0.34, 0, 1.62, -0.2),
+      carBody: farBody,
+      carCabin: farCabin,
+      carWheels: null,
+      carTails: null,
+      tramPanto: null,
+    };
+    const farCoaches = { bus: flat(12, 2.5), trolley: flat(12, 2.5), minibus: flat(7.5, 2.3), tram: flat(TRAM_MODEL, 2.45) };
+    for (const [group, parts] of Object.entries(farCoaches)) for (const [p, geo] of Object.entries(parts)) far[`${group}${p}` as Part] = geo;
+    return { carBody, carCabin, carWheels, tails, sign, halo, transit, tram, far };
   }, []);
 }
 
@@ -163,6 +191,18 @@ const setCursor = (value: string) => {
 
 export function Vehicles() {
   const g = useGeometries();
+  const lod = useUi((s) => s.lod);
+  // Swap every part to its far model (or hide it) and back; nothing casts a shadow from afar.
+  useEffect(() => {
+    for (const part of Object.keys(meshes) as Part[]) {
+      const m = meshes[part]!;
+      const near = (m.userData.near ??= { geometry: m.geometry, castShadow: m.castShadow }) as { geometry: THREE.BufferGeometry; castShadow: boolean };
+      const far = lod === 'far' && part in g.far ? g.far[part]! : undefined;
+      m.geometry = far ?? near.geometry;
+      m.visible = far !== null;
+      m.castShadow = near.castShadow && lod === 'near';
+    }
+  }, [lod, g]);
   const poses = useRef<VehiclePose[]>([]);
   // For trams: the tram id of every section instance.
   const ids = useRef<Record<Group, string[]>>({ taxi: [], car: [], bus: [], trolley: [], minibus: [], tram: [] });
@@ -176,6 +216,9 @@ export function Vehicles() {
   const parkOf = useMemo(() => new Map(fleet.data?.map((v) => [v.id, v.parkId]) ?? []), [fleet.data]);
 
   useFrame(({ clock, camera }) => {
+    // Vehicles off screen are not drawn (their poses still feed overlays and trails).
+    view.setFromProjectionMatrix(projView.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
+    const inView = (x: number, z: number, r: number) => view.intersectsSphere(sphere.set(at.set(x, 1, z), r));
     let halos = 0;
     // Roughly constant on screen: larger when zoomed out, never smaller than the car.
     const pulse = (1 + Math.sin(clock.elapsedTime * HALO_PULSE) * 0.08) * Math.max(1, 7 / camera.zoom);
@@ -190,7 +233,7 @@ export function Vehicles() {
       if (p.kind === KIND.TRAM) {
         const car = (p.flags & LONG_TRAM) !== 0 ? TRAM.long : TRAM.short;
         trails.feed(p.id, p.x, p.z, p.heading, car.length);
-        if (trams >= MAX.tram) continue;
+        if (trams >= MAX.tram || !inView(p.x, p.z, car.length + 6)) continue;
         const grow = Math.max(0.01, Math.min(1, p.age / 500)) * 1.15;
         const sections = trails.sections(p.id, car.length, car.sections, sectionPoses);
         const along = (car.length / car.sections - TRAM_JOINT) / TRAM_MODEL;
@@ -213,6 +256,7 @@ export function Vehicles() {
         p.z = sections.reduce((a, q) => a + q.z, 0) / sections.length;
         continue;
       }
+      if (!inView(p.x, p.z, 12)) continue;
       const group: Group =
         p.kind === KIND.TAXI ? 'taxi' : p.kind === KIND.BUS ? 'bus' : p.kind === KIND.TROLLEY ? 'trolley' : p.kind === KIND.MINIBUS ? 'minibus' : 'car';
       const k = counts[group];
