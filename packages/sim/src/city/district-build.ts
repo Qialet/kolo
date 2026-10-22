@@ -54,7 +54,7 @@ const RANK: Record<RoadClass, number> = {
   tram: 20,
 };
 const RING_BONUS = 10;
-export const laneWidthOf = (cls: RoadClass) => (cls === 'residential' || cls === 'living_street' ? 3.0 : 3.2);
+export const laneWidthOf = (cls: RoadClass) => (cls === 'tram' ? 2.6 : cls === 'residential' || cls === 'living_street' ? 3.0 : 3.2);
 
 /** A road between two graph nodes while the graph is being simplified. */
 interface WorkEdge {
@@ -80,7 +80,6 @@ export function buildCityFromDistrict(district: District): City {
 
   const edges = new Map<number, WorkEdge>();
   for (const e of roads.edges) {
-    if (e.cls === 'tram') continue;
     const pts: Vec2[] = [];
     for (let i = 0; i < e.pts.length; i += 2) pts.push({ x: e.pts[i]!, z: e.pts[i + 1]! });
     edges.set(e.id, { id: e.id, a: e.a, b: e.b, pts, src: e, lanesFwd: e.lanesFwd, lanesBwd: e.lanesBwd, turnFwd: e.turnFwd, turnBwd: e.turnBwd, merged: [e.id] });
@@ -92,6 +91,9 @@ export function buildCityFromDistrict(district: District): City {
   const ringNode = new Set<number>();
   for (const e of edges.values()) if (e.src.roundabout) ringNode.add(e.a).add(e.b);
   const isJunction = (n: number) => (incident.get(n)?.size ?? 0) >= 3 || signalled.has(n) || ringNode.has(n);
+  // A street passing over a track is no street junction: it must not stretch the circle of the real one next to it.
+  const roadDegree = (n: number) => [...(incident.get(n) ?? [])].filter((id) => edges.get(id)!.src.cls !== 'tram').length;
+  const sizesJunction = new Set([...nodePos.keys()].filter((n) => roadDegree(n) >= 3 || signalled.has(n) || ringNode.has(n)));
   const cluster = new Map<number, number[]>();
   const clusterOf = new Map<number, number>();
   for (const n of nodePos.keys()) {
@@ -133,6 +135,7 @@ export function buildCityFromDistrict(district: District): City {
     lanes: [],
     connectors: [],
     roads: [],
+    tracks: [],
     areas: [],
     buildings: [],
     trees: [],
@@ -152,7 +155,9 @@ export function buildCityFromDistrict(district: District): City {
   for (const [key, members] of cluster) {
     const used = members.some((m) => (incident.get(m)?.size ?? 0) > 0);
     if (!used) continue;
-    const c = centroid(members.map((m) => nodePos.get(m)!));
+    const sized = members.filter((m) => sizesJunction.has(m));
+    const shape = sized.length ? sized : members;
+    const c = centroid(shape.map((m) => nodePos.get(m)!));
     const node: CityNode = {
       id: city.nodes.length,
       x: round2(c.x),
@@ -166,7 +171,7 @@ export function buildCityFromDistrict(district: District): City {
     if (members.some((m) => boundary.has(m))) node.boundary = true;
     city.nodes.push(node);
     nodeOfCluster.set(key, node);
-    radius.set(node.id, Math.max(0, ...members.map((m) => dist(nodePos.get(m)!, c))));
+    radius.set(node.id, Math.max(0, ...shape.map((m) => dist(nodePos.get(m)!, c))));
   }
   const cityNode = (osmGraphNode: number) => nodeOfCluster.get(clusterOf.get(osmGraphNode)!)!;
 
@@ -236,6 +241,7 @@ export function buildCityFromDistrict(district: District): City {
       };
       if (e.src.psvOnly) seg.psvOnly = true;
       if (e.src.trolley) seg.trolley = true;
+      if (e.src.cls === 'tram') seg.rail = true;
       city.segments.push(seg);
       city.segmentByKey.set(`${from.id}>${to.id}`, seg.id);
       from.out.push(seg.id);
@@ -253,10 +259,13 @@ export function buildCityFromDistrict(district: District): City {
 
   // ── junction sizes: room for the widest crossing road ──
   const degreeOf = new Map<number, number>();
+  /** Streets meeting at a node, tracks left out: only road junctions take traffic lights. */
+  const roadDegreeOf = new Map<number, number>();
   for (const node of city.nodes) {
     const segs = [...node.in, ...node.out];
     const degree = new Set(segs.map((s) => info[s]!.edge.id)).size;
     degreeOf.set(node.id, degree);
+    roadDegreeOf.set(node.id, new Set(segs.filter((s) => !city.segments[s]!.rail).map((s) => info[s]!.edge.id)).size);
     let r = 0;
     if (!node.boundary && degree >= 3) {
       r = radius.get(node.id)! + Math.max(...segs.map((s) => halfWidthOf(info[s]!.edge))) + 1.5;
@@ -267,7 +276,7 @@ export function buildCityFromDistrict(district: District): City {
   }
 
   // ── traffic signals: an OSM signal node belongs to the nearest junction within reach ──
-  const junctions = city.nodes.filter((n) => !n.boundary && degreeOf.get(n.id)! >= 3);
+  const junctions = city.nodes.filter((n) => !n.boundary && roadDegreeOf.get(n.id)! >= 3);
   const lit = new Set<number>();
   for (const n of roads.nodes) {
     if (!n.signals) continue;
@@ -305,7 +314,7 @@ export function buildCityFromDistrict(district: District): City {
     const from = city.nodes[seg.from]!;
     const to = city.nodes[seg.to]!;
     for (let i = 0; i < si.lanes; i++) {
-      const offset = si.twoWay ? (i + 0.5) * si.width : (i + 0.5) * si.width - (si.lanes * si.width) / 2;
+      const offset = seg.rail ? 0 : si.twoWay ? (i + 0.5) * si.width : (i + 0.5) * si.width - (si.lanes * si.width) / 2;
       const shifted = polyline(offsetPoints(si.base.points, offset));
       const line = trimToJunctions(shifted, from, to);
       const lane: Lane = {
@@ -358,6 +367,7 @@ export function buildCityFromDistrict(district: District): City {
       for (const outId of node.out) {
         const sOut = city.segments[outId]!;
         if (info[outId]!.edge === info[inId]!.edge) continue;
+        if (!!sOut.rail !== !!sIn.rail) continue;
         if (banned.has(`${inId}>${outId}`) || (only && !only.has(outId))) continue;
         const turn = turnBetween(sIn, sOut);
         if (turn) moves.push({ sOut, turn });
@@ -371,7 +381,7 @@ export function buildCityFromDistrict(district: District): City {
         }
       }
       // Dead end of a two-way street: turn around from the inner lane.
-      if (!moves.length && !node.boundary && node.out.length && node.out.every((o) => info[o]!.edge === info[inId]!.edge)) {
+      if (!sIn.rail && !moves.length && !node.boundary && node.out.length && node.out.every((o) => info[o]!.edge === info[inId]!.edge)) {
         const back = city.segments[node.out[0]!]!;
         created.push(connect(city, node, lanesIn[0]!, city.lanes[back.lanes[0]!]!, 'L', sIn, back));
       }
@@ -399,7 +409,10 @@ export function buildCityFromDistrict(district: District): City {
   }
   void signalPoints;
   for (const id of largestCarScc(city)) city.segments[id]!.core = true;
-  for (const e of edges.values()) city.roads.push(roadStrip(e));
+  for (const e of edges.values()) {
+    if (e.src.cls === 'tram') city.tracks.push({ points: e.pts, layer: e.src.layer });
+    else city.roads.push(roadStrip(e));
+  }
   addPlaces(city, district);
   addTransit(city, district.transit);
   layoutDepots(city, district.depotSites);
@@ -437,14 +450,21 @@ function planSignal(city: City, node: CityNode) {
   const approaches = node.in.map((s) => city.segments[s]!);
   const groups: Segment[][] = [];
   for (const a of approaches) {
+    if (a.rail) continue;
     const g = groups.find((list) => list.every((b) => Math.abs(dot(a.dirOut, b.dirOut)) > PHASE_ALIGN));
     if (g) g.push(a);
     else groups.push([a]);
   }
   if (groups.length < 2) return;
+  // Tracks never get a phase of their own: a tram moves with the street it runs closest to.
+  for (const a of approaches) {
+    if (!a.rail) continue;
+    const align = (g: Segment[]) => Math.max(...g.map((b) => Math.abs(dot(a.dirOut, b.dirOut))));
+    groups.reduce((best, g) => (align(g) > align(best) ? g : best)).push(a);
+  }
   groups.forEach((g, i) => g.forEach((s) => (s.phase = i)));
-  const top = Math.max(...approaches.map((s) => s.rank));
-  const phases = groups.map((g) => ({ green: g.some((s) => s.rank === top) ? GREEN_MAIN : GREEN_SIDE }));
+  const top = Math.max(...approaches.filter((s) => !s.rail).map((s) => s.rank));
+  const phases = groups.map((g) => ({ green: g.some((s) => !s.rail && s.rank === top) ? GREEN_MAIN : GREEN_SIDE }));
   const cycle = cycleOf({ phases, offset: 0 });
   node.signal = { phases, offset: (node.id * 7919) % cycle };
 }

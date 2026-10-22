@@ -6,6 +6,12 @@ import type { District, RoadEdge, RoadNode } from './district.js';
 import { buildCityFromDistrict } from './district-build.js';
 import type { City } from './types.js';
 
+/** Processor time of this test process in ms: unlike the wall clock it does not grow when other test processes compete for the CPU. */
+const cpuMs = () => {
+  const u = process.cpuUsage();
+  return (u.user + u.system) / 1000;
+};
+
 const REAL = new URL('../../../../data/districts/belgrade-center.json', import.meta.url);
 
 function district(nodes: [number, number, Partial<RoadNode>?][], edges: [number, number, Partial<RoadEdge>?, [number, number][]?][], restrictions: District['roads']['restrictions'] = []): District {
@@ -159,9 +165,129 @@ describe('buildCityFromDistrict on small districts', () => {
   });
 });
 
+describe('tram tracks in the junction graph', () => {
+  /** A street from west to east crossed at the origin by a southbound track. */
+  const crossing = () =>
+    buildCityFromDistrict(
+      district(
+        [
+          [0, 0],
+          [-100, 0, { boundary: true }],
+          [100, 0, { boundary: true }],
+          [0, -100, { boundary: true }],
+          [0, 100, { boundary: true }],
+        ],
+        [
+          [1, 0],
+          [0, 2],
+          [3, 0, { cls: 'tram', lanesFwd: 1, lanesBwd: 0, psvOnly: true, name: '', speed: 11.11 }],
+          [0, 4, { cls: 'tram', lanesFwd: 1, lanesBwd: 0, psvOnly: true, name: '', speed: 11.11 }],
+        ],
+      ),
+    );
+
+  it('makes rail segments with one lane on the track axis and no asphalt', () => {
+    const city = crossing();
+    const rail = city.segments.filter((s) => s.rail);
+    expect(rail).toHaveLength(2);
+    for (const s of rail) {
+      expect(s.psvOnly).toBe(true);
+      const lane = city.lanes[s.lanes[0]!]!;
+      expect([s.lanes.length, lane.offset]).toEqual([1, 0]);
+      expect(Math.abs(lane.start.x)).toBeLessThan(0.01);
+    }
+    expect(city.roads).toHaveLength(2);
+    expect(city.tracks).toHaveLength(2);
+    expect(city.tracks[0]!.points.every((p) => Math.abs(p.x) < 0.01)).toBe(true);
+  });
+
+  it('joins rail only to rail and road only to road, and crossing moves conflict', () => {
+    const city = crossing();
+    for (const c of city.connectors) {
+      expect(!!city.segments[city.lanes[c.from]!.seg]!.rail).toBe(!!city.segments[city.lanes[c.to]!.seg]!.rail);
+    }
+    const tram = city.connectors.filter((c) => city.segments[city.lanes[c.from]!.seg]!.rail);
+    expect(tram).toHaveLength(1);
+    const straight = city.connectors.filter((c) => !city.segments[city.lanes[c.from]!.seg]!.rail && c.turn === 'S');
+    expect(straight.length).toBeGreaterThan(0);
+    for (const c of straight) expect(c.conflicts).toContain(tram[0]!.id);
+  });
+
+  it('does not grow a street junction where a track crosses its arm next to it', () => {
+    const tram = { cls: 'tram', lanesFwd: 1, lanesBwd: 0, psvOnly: true, name: '', speed: 11.11 } as const;
+    const crossed = buildCityFromDistrict(
+      district(
+        [
+          [0, 0],
+          [-100, 0, { boundary: true }],
+          [100, 0, { boundary: true }],
+          [0, -100, { boundary: true }],
+          [0, 100, { boundary: true }],
+          [4, 0],
+          [4, -100, { boundary: true }],
+          [4, 100, { boundary: true }],
+        ],
+        [
+          [1, 0],
+          [0, 5],
+          [5, 2],
+          [3, 0],
+          [0, 4],
+          [6, 5, tram],
+          [5, 7, tram],
+        ],
+      ),
+    );
+    const plain = buildCityFromDistrict(plus());
+    const junction = (c: City) => c.nodes.find((n) => !n.boundary)!;
+    expect(crossed.nodes.filter((n) => !n.boundary)).toHaveLength(1);
+    expect(junction(crossed).radius).toBeCloseTo(junction(plain).radius, 1);
+    expect(junction(crossed).x).toBeCloseTo(0, 1);
+  });
+
+  it('gives the track right of way over the street', () => {
+    const city = crossing();
+    const rail = city.segments.find((s) => s.rail && s.to === 0)!;
+    for (const s of city.segments.filter((x) => !x.rail && x.to === 0)) expect(s.rank).toBeLessThan(rail.rank);
+  });
+});
+
 describe('buildCityFromDistrict on Belgrade', () => {
   const real = JSON.parse(readFileSync(REAL, 'utf8')) as District;
   const city = buildCityFromDistrict(real);
+  // Timed warm (the first build also pays for compiling the module), best of three against parallel test load.
+  let buildMs = Infinity;
+  for (let i = 0; i < 3; i++) {
+    const t0 = cpuMs();
+    buildCityFromDistrict(real);
+    buildMs = Math.min(buildMs, cpuMs() - t0);
+  }
+  const road = city.segments.filter((s) => !s.rail);
+  const railOf = (lane: number) => !!city.segments[city.lanes[lane]!.seg]!.rail;
+
+  it('builds the city in well under a second', () => {
+    // About 0.35 s of wall time alone; processor time also counts GC threads and grows under parallel test load.
+    expect(buildMs).toBeLessThan(1000);
+  });
+
+  it('lays the tram tracks as rail segments joined only to each other', () => {
+    expect(city.segments.filter((s) => s.rail).length).toBeGreaterThanOrEqual(40);
+    expect(city.tracks.length).toBeGreaterThanOrEqual(40);
+    for (const c of city.connectors) expect(railOf(c.from)).toBe(railOf(c.to));
+    const mixed = city.nodes.filter((n) =>
+      city.connectors.some((c) => c.node === n.id && railOf(c.from) && c.conflicts.some((k) => !railOf(city.connectors[k]!.from))),
+    );
+    expect(mixed.length).toBeGreaterThanOrEqual(40);
+  });
+
+  it('never gives the tracks a signal phase of their own', () => {
+    for (const node of city.nodes) {
+      if (!node.signal) continue;
+      for (let i = 0; i < node.signal.phases.length; i++) {
+        expect(node.in.some((s) => city.segments[s]!.phase === i && !city.segments[s]!.rail), `${node.name} phase ${i}`).toBe(true);
+      }
+    }
+  });
 
   it('has finite geometry and usable lanes', () => {
     expect(city.lanes.length).toBeGreaterThan(1500);
@@ -176,15 +302,17 @@ describe('buildCityFromDistrict on Belgrade', () => {
     let missing = 0;
     for (const lane of city.lanes) {
       const end = city.nodes[city.segments[lane.seg]!.to]!;
-      if (end.out.length === 0 || lane.out.length > 0) continue;
-      const onlyBack = end.out.every((s) => city.segments[s]!.reverse === lane.seg);
+      // Trams go on only along the tracks, cars only along the streets.
+      const outs = end.out.filter((s) => !!city.segments[s]!.rail === railOf(lane.id));
+      if (outs.length === 0 || lane.out.length > 0) continue;
+      const onlyBack = outs.every((s) => city.segments[s]!.reverse === lane.seg);
       if (!onlyBack) missing++;
     }
     expect(missing).toBe(0);
   });
 
   it('keeps nearly all segments mutually reachable', () => {
-    expect(largestSegmentScc(city) / city.segments.length).toBeGreaterThan(0.95);
+    expect(largestSegmentScc(city) / road.length).toBeGreaterThan(0.95);
   });
 
   it('gives the Slavija ring right of way over its entries', () => {
@@ -194,7 +322,8 @@ describe('buildCityFromDistrict on Belgrade', () => {
       const node = city.nodes[s.to]!;
       for (const other of node.in) {
         const o = city.segments[other]!;
-        if (city.streets[o.street]!.name !== 'Trg Slavija') expect(o.rank).toBeLessThan(s.rank);
+        // Trams crossing the ring go first (rank 20); every street entry yields.
+        if (city.streets[o.street]!.name !== 'Trg Slavija' && !o.rail) expect(o.rank).toBeLessThan(s.rank);
       }
     }
   });
@@ -215,8 +344,8 @@ describe('buildCityFromDistrict on Belgrade', () => {
   });
 
   it('keeps most of the network in the core that never needs the outside world', () => {
-    const core = city.segments.filter((s) => s.core);
-    expect(core.length / city.segments.length).toBeGreaterThan(0.75);
+    const core = road.filter((s) => s.core);
+    expect(core.length / road.length).toBeGreaterThan(0.8);
     expect(core.some((s) => city.nodes[s.from]!.boundary || city.nodes[s.to]!.boundary)).toBe(false);
   });
 

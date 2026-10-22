@@ -88,8 +88,8 @@ export function buildTransitNet(city: City, transit: DistrictTransit): TransitNe
   const stopIndex = new Map(city.busStops.map((s, i) => [s.id, i]));
   const lineIndex = new Map(city.busLines.map((l, i) => [l.id, i]));
   const mids = segmentMids(city);
-  const entries = city.segments.filter((s) => city.nodes[s.from]!.boundary);
-  const exits = city.segments.filter((s) => city.nodes[s.to]!.boundary);
+  const entries = city.segments.filter((s) => !s.rail && city.nodes[s.from]!.boundary);
+  const exits = city.segments.filter((s) => !s.rail && city.nodes[s.to]!.boundary);
   const net: TransitNet = { patterns: [], byLine: new Map() };
 
   transit.patterns.forEach((raw, index) => {

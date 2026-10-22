@@ -13,11 +13,11 @@ const STOP_END = 4;
 /** Shelter centre measured from the kerb into the sidewalk. */
 const SHELTER_BEHIND_KERB = 1.6;
 
-/** Street-level curb lanes (bus-only roads included, tunnels and bridge decks not) indexed for stop binding. */
+/** Street-level curb lanes (bus-only roads included; tunnels, bridge decks and tram tracks not) indexed for stop binding. */
 function curbLanes(city: City): SegmentGrid<{ lane: Lane; s0: number }> {
   const grid = new SegmentGrid<{ lane: Lane; s0: number }>();
   for (const seg of city.segments) {
-    if (seg.layer !== 0) continue;
+    if (seg.layer !== 0 || seg.rail) continue;
     const lane = city.lanes[seg.lanes[seg.lanes.length - 1]!]!;
     if (lane.length < STOP_START + STOP_END) continue;
     const { points, cum } = lane.line;

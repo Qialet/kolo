@@ -62,6 +62,8 @@ export interface Segment {
   psvOnly?: boolean;
   /** Has trolleybus wires overhead. */
   trolley?: boolean;
+  /** Tram track (also psvOnly): one lane on the track axis, joined only to other tracks. */
+  rail?: boolean;
   /**
    * In the main strongly connected network: every core segment reaches every other one without
    * leaving the map. Taxis, addresses and orders live here; frame entries and exits are not core.
@@ -120,6 +122,12 @@ export interface Area {
   kind: AreaKind;
   outer: Vec2[];
   holes: Vec2[][];
+}
+
+/** Axis of one tram track between junctions, for rails and the overhead wire. */
+export interface Track {
+  points: Vec2[];
+  layer: number;
 }
 
 /** Asphalt of one road between junctions: its OSM centre line and the paved width on each side. */
@@ -248,6 +256,7 @@ export interface City {
   lanes: Lane[];
   connectors: Connector[];
   roads: RoadStrip[];
+  tracks: Track[];
   areas: Area[];
   buildings: Building[];
   trees: Tree[];
