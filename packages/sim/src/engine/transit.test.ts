@@ -1,0 +1,156 @@
+import { readFileSync } from 'node:fs';
+import { describe, expect, it } from 'vitest';
+import { isTransitKind } from '@kolo/contracts';
+import type { District } from '../city/district.js';
+import { buildCityFromDistrict } from '../city/district-build.js';
+import { createRng } from '../rng.js';
+import { Simulation, type FleetVehicleSeed } from './simulation.js';
+import { makeVehicle, TrafficSystem } from './traffic.js';
+import { serviceEpoch, Transit } from './transit.js';
+import { buildTransitNet } from './transit-net.js';
+
+const REAL = new URL('../../../../data/districts/belgrade-center.json', import.meta.url);
+const city = buildCityFromDistrict(JSON.parse(readFileSync(REAL, 'utf8')) as District);
+const net = buildTransitNet(city, city.transit);
+
+/** Thursday 22 Oct 2026, 15:30 in Belgrade (CEST). */
+const WEEKDAY_1530 = Date.UTC(2026, 9, 22, 13, 30);
+
+function fleet(n: number): FleetVehicleSeed[] {
+  return Array.from({ length: n }, (_, i) => ({
+    id: `T${i + 1}`,
+    plate: `BG ${100 + i}-TX`,
+    model: 'Škoda Octavia',
+    parkId: ['P1', 'P2', 'P3'][i % 3]!,
+    parkName: 'Park',
+    fleetStatus: i < n * 0.8 ? 'ON_LINE' : 'IN_PARK',
+    driverName: 'Test Driver',
+    driverRating: 4.8,
+  }));
+}
+
+const transitVehicles = (sim: Simulation) => sim.traffic.vehicles.filter((v) => isTransitKind(v.kind));
+
+describe('timetable transit', () => {
+  it('runs a weekday afternoon on the timetable', () => {
+    const sim = new Simulation(city, fleet(30), { startAt: WEEKDAY_1530, demand: 0.5 });
+    expect(sim.clock).toBe(WEEKDAY_1530);
+    let overlaps = 0;
+    let checks = 0;
+    const t0 = performance.now();
+    for (let i = 0; i < 600 * 20; i++) {
+      sim.step(0.05);
+      if (i % 100 !== 0) continue;
+      const byLane = new Map<number, { s: number; len: number }[]>();
+      for (const v of sim.traffic.vehicles) {
+        expect(Number.isFinite(v.pose.x) && Number.isFinite(v.pose.z), v.id).toBe(true);
+        if (isTransitKind(v.kind) && (v.mode === 'lane' || v.mode === 'conn')) expect(v.stoppedFor, v.id).toBeLessThan(180);
+        if (v.mode !== 'lane') continue;
+        const list = byLane.get(v.lane) ?? [];
+        list.push({ s: v.s, len: v.length });
+        byLane.set(v.lane, list);
+      }
+      for (const list of byLane.values()) {
+        list.sort((a, b) => a.s - b.s);
+        for (let k = 1; k < list.length; k++) {
+          checks++;
+          if (list[k]!.s - list[k]!.len < list[k - 1]!.s - 0.5) overlaps++;
+        }
+      }
+    }
+    const ms = performance.now() - t0;
+    expect(sim.clock).toBe(WEEKDAY_1530 + 600_000);
+    expect(transitVehicles(sim).length).toBeGreaterThanOrEqual(100);
+    const { servedStops, missedStops } = sim.transit.stats;
+    expect(servedStops / (servedStops + missedStops)).toBeGreaterThanOrEqual(0.9);
+    expect(overlaps / Math.max(1, checks)).toBeLessThan(0.002);
+    expect(ms).toBeLessThan(6000);
+    // Trolleybuses and minibuses run as their own kinds.
+    expect(new Set(transitVehicles(sim).map((v) => v.kind))).toEqual(new Set(['BUS', 'TROLLEY', 'MINIBUS']));
+    expect(transitVehicles(sim).every((v) => /^B\d+$/.test(v.id))).toBe(true);
+  });
+
+  it('is nearly empty at three in the morning', () => {
+    const sim = new Simulation(city, fleet(4), { startAt: Date.UTC(2026, 9, 22, 1, 0) });
+    for (let i = 0; i < 60 * 20; i++) sim.step(0.05);
+    expect(transitVehicles(sim).length).toBeLessThan(20);
+  });
+
+  it('runs the Sunday night service past midnight into Monday', () => {
+    // 00:30 on Monday 26 Oct 2026 (CET, the day after the clocks went back).
+    const sim = new Simulation(city, fleet(4), { startAt: Date.UTC(2026, 9, 25, 23, 30) });
+    const trips = [...sim.transit.trips.values()];
+    expect(trips.some((t) => t.date === '20261025' && t.service === 'N')).toBe(true);
+  });
+
+  it('runs the Sunday service on a public holiday', () => {
+    const sim = new Simulation(city, fleet(4), { startAt: Date.UTC(2026, 10, 11, 14, 30) });
+    const trips = [...sim.transit.trips.values()];
+    expect(trips.length).toBeGreaterThan(20);
+    expect(trips.every((t) => t.service === 'N')).toBe(true);
+  });
+
+  it('holds a trip at a blocked frame entry, then gives it up after 120 s', () => {
+    const traffic = new TrafficSystem(city);
+    const transit = new Transit(traffic, net, createRng(3));
+    const at = WEEKDAY_1530;
+    transit.rebuild(at);
+    // The next trip entering through the frame after a minute.
+    const next = transit.tripsBetween(at + 60_000, at + 600_000).find((t) => t.pattern.entryLane >= 0)!;
+    expect(next).toBeDefined();
+    const blocker = makeVehicle('X1', 'CAR', createRng(1));
+    traffic.placeOnLane(blocker, next.pattern.entryLane, 5);
+    traffic.add(blocker);
+    const spawned = () => [...transit.trips.values()].some((t) => t.key === next.key);
+    for (let ms = at; ms <= next.spawnAt + 60_000; ms += 1000) transit.update(ms);
+    expect(spawned()).toBe(false);
+    traffic.remove(blocker);
+    transit.update(next.spawnAt + 61_000);
+    expect(spawned()).toBe(true);
+
+    const traffic2 = new TrafficSystem(city);
+    const transit2 = new Transit(traffic2, net, createRng(3));
+    transit2.rebuild(at);
+    traffic2.placeOnLane(blocker, next.pattern.entryLane, 5);
+    traffic2.add(blocker);
+    const missed = transit2.stats.missedTrips;
+    for (let ms = at; ms <= next.spawnAt + 125_000; ms += 1000) transit2.update(ms);
+    traffic2.remove(blocker);
+    transit2.update(next.spawnAt + 126_000);
+    expect([...transit2.trips.values()].some((t) => t.key === next.key)).toBe(false);
+    expect(transit2.stats.missedTrips).toBeGreaterThan(missed);
+  });
+
+  it('puts the buses back on the timetable when the clock is synced after running fast', () => {
+    const sim = new Simulation(city, fleet(20), { startAt: WEEKDAY_1530 });
+    for (let i = 0; i < 300 * 20; i++) sim.step(0.05);
+    const taxis = [...sim.taxis.keys()];
+    const orders = [...sim.orders.keys()];
+    const wall = WEEKDAY_1530 + 75_000;
+    sim.syncClock(wall);
+    expect(sim.clock).toBe(wall);
+    const fresh = new Simulation(city, fleet(20), { startAt: wall });
+    const n = transitVehicles(sim).length;
+    const m = transitVehicles(fresh).length;
+    expect(Math.abs(n - m) / m).toBeLessThanOrEqual(0.15);
+    const ids = transitVehicles(sim).map((v) => v.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect([...sim.taxis.keys()]).toEqual(taxis);
+    expect([...sim.orders.keys()]).toEqual(orders);
+    // Nothing stands on top of anything after the rebuild.
+    const byLane = new Map<number, number[]>();
+    for (const v of transitVehicles(sim)) if (v.mode === 'lane' || v.mode === 'pulled') byLane.set(v.lane, [...(byLane.get(v.lane) ?? []), v.s]);
+    for (const list of byLane.values()) {
+      list.sort((a, b) => a - b);
+      for (let k = 1; k < list.length; k++) expect(list[k]! - list[k - 1]!).toBeGreaterThan(7);
+    }
+  });
+
+  it('counts service seconds from noon minus twelve hours across clock changes', () => {
+    // 25 Oct 2026 is 25 hours long in Belgrade and 29 Mar 23: noon sets the offset for the whole service day.
+    expect(serviceEpoch('20261022', 0)).toBe(Date.UTC(2026, 9, 21, 22, 0));
+    expect(serviceEpoch('20261025', 12 * 3600)).toBe(Date.UTC(2026, 9, 25, 11, 0));
+    expect(serviceEpoch('20261025', 25 * 3600)).toBe(Date.UTC(2026, 9, 26, 0, 0));
+    expect(serviceEpoch('20260329', 12 * 3600)).toBe(Date.UTC(2026, 2, 29, 10, 0));
+  });
+});

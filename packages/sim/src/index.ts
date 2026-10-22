@@ -8,6 +8,7 @@ export * from './engine/signals.js';
 export { chooseLanes, routeSegments, laneIndexesFor, turnBetween } from './engine/routing.js';
 export { TrafficSystem, makeVehicle, type Vehicle, type PathStep } from './engine/traffic.js';
 export { Simulation, labelOfStatus, type FleetVehicleSeed, type Place, type SimHooks, type SimOrderEvent, type SimulationOptions } from './engine/simulation.js';
+export { Transit, serviceEpoch, type ScheduledTrip, type Trip, type TripPhase } from './engine/transit.js';
 export { buildTransitNet, patternPoint, type NetPattern, type NetStop, type TransitNet } from './engine/transit-net.js';
 export { belgradeTime, orthodoxEaster, serbianHolidays, serviceFor, type BelgradeTime, type TransitCalendar } from './transit/calendar.js';
 export { MODELS, driverName, passengerName, taxiPlate } from './engine/names.js';

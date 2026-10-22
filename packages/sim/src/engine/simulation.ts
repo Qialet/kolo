@@ -30,6 +30,8 @@ import { CANCEL_REASONS_PASSENGER, DISPUTE_REASONS, passengerName } from './name
 import { cycleOf, signalState } from './signals.js';
 import { Roaming } from './roaming.js';
 import { makeVehicle, TrafficSystem, type Vehicle } from './traffic.js';
+import { Transit } from './transit.js';
+import { buildTransitNet } from './transit-net.js';
 
 export interface FleetVehicleSeed {
   id: string;
@@ -75,6 +77,8 @@ export interface SimulationOptions {
   demand?: number;
   /** Last used order number, so codes stay unique across restarts. */
   lastOrderNumber?: number;
+  /** Epoch ms of simulation time 0 (the Belgrade clock the timetable runs on); now by default. */
+  startAt?: number;
   hooks?: SimHooks;
 }
 
@@ -142,6 +146,7 @@ export class Simulation {
   readonly traffic: TrafficSystem;
   readonly taxis = new Map<string, Taxi>();
   readonly roaming: Roaming;
+  readonly transit: Transit;
   readonly orders = new Map<string, SimOrder>();
   private readonly rng: Rng;
   private readonly hooks: SimHooks;
@@ -151,6 +156,7 @@ export class Simulation {
   private readonly stopPlaces: Place[] = [];
   private readonly slotUse = new Map<string, (string | null)[]>();
   private readonly boxUse = new Map<string, (string | null)[]>();
+  private startAt: number;
   private orderSeq = 10000;
   private eventSeq = 0;
   private dispatchClock = 0;
@@ -171,6 +177,7 @@ export class Simulation {
     this.trafficDensity = opts.trafficDensity ?? 0.6;
     this.demand = opts.demand ?? 1;
     this.orderSeq = Math.max(10000, opts.lastOrderNumber ?? 0);
+    this.startAt = opts.startAt ?? Date.now();
     this.traffic = new TrafficSystem(city);
     for (const a of city.addresses) this.places.set(a.id, { id: a.id, label: a.label, lane: a.lane, s: a.s, x: a.x, z: a.z });
     for (const st of city.busStops) {
@@ -190,6 +197,8 @@ export class Simulation {
     }
     this.roaming = new Roaming(this.traffic, this.rng);
     this.spawnFleet(fleet);
+    this.transit = new Transit(this.traffic, buildTransitNet(city, city.transit), this.rng);
+    this.transit.rebuild(this.clock);
     this.roaming.update(this.carTarget, true);
   }
 
@@ -282,15 +291,28 @@ export class Simulation {
     return this.traffic.t;
   }
 
+  /** Epoch ms on the simulation's Belgrade clock: runs with the simulation, faster when sped up. */
+  get clock() {
+    return this.startAt + Math.round(this.traffic.t * 1000);
+  }
+
+  /** Sets the clock back to real time and puts public transport where the timetable has it then. */
+  syncClock(nowMs = Date.now()) {
+    this.startAt = nowMs - Math.round(this.traffic.t * 1000);
+    this.transit.rebuild(this.clock);
+  }
+
   step(dt: number) {
     this.traffic.step(dt);
     const t = this.traffic.t;
+    this.transit.step(this.clock);
     for (const taxi of this.taxis.values()) this.updateTaxi(taxi, t);
     this.roaming.step(this.carTarget);
     this.dispatchClock += dt;
     if (this.dispatchClock >= 1) {
       this.dispatchClock = 0;
       this.roaming.update(this.carTarget);
+      this.transit.update(this.clock);
       this.updateOrders(t);
       this.maybeBreakdown();
       this.lifecycle();
@@ -969,10 +991,25 @@ export class Simulation {
     };
   }
 
-  /** Timetable buses come with the transit runner; until then there is nothing to inspect. */
   busDetail(id: string): BusDetail | null {
-    void id;
-    return null;
+    const trip = this.transit.byVehicle.get(id);
+    if (!trip) return null;
+    const v = trip.v;
+    const line = this.city.busLines[trip.pattern.line]!;
+    const next = trip.pattern.stops[trip.next];
+    const clock = this.clock;
+    const eta = next ? Math.max(0, Math.round((this.transit.arrivalAt(trip, trip.next) - clock) / 1000 + trip.delaySec)) : 0;
+    return {
+      id,
+      line: line.id,
+      lineName: line.name,
+      speedKmh: Math.round(v.speed * 36) / 10,
+      nextStop: next ? this.city.busStops[next.stop]!.name : '—',
+      etaSec: eta,
+      dwellLeftSec: trip.phase === 'dwell' ? Math.max(0, Math.round((trip.dwellUntil - clock) / 1000)) : 0,
+      passengers: 8 + (Number(id.slice(1)) * 37) % 50,
+      route: this.traffic.routeOf(v).points.slice(0, 40).map((p) => ({ x: round(p.x), z: round(p.z) })),
+    };
   }
 }
 

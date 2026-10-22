@@ -198,23 +198,6 @@ export class TrafficSystem {
     return true;
   }
 
-  /** Appends an explicit chain of segments (bus loops), choosing legal lanes for each turn. */
-  appendSegments(v: Vehicle, segs: number[], preferCurb: boolean): boolean {
-    const { city } = this;
-    if (!v.path.length) return false;
-    // The last step was planned without knowing the next turn; re-choose it if not yet entered.
-    const lastIdx = v.path.length - 1;
-    const replan = lastIdx > v.pathIdx;
-    const anchor = v.path[replan ? lastIdx - 1 : lastIdx]!;
-    const chain = [city.lanes[anchor.lane]!.seg, ...(replan ? [city.lanes[v.path[lastIdx]!.lane]!.seg] : []), ...segs];
-    const rest = chooseLanes(city, chain, anchor.lane, -1, laneIndexesFor(city, chain, preferCurb ? 9 : v.straightPreference, 'any'));
-    if (!rest) return false;
-    if (replan) v.path.pop();
-    v.path.push(...rest);
-    v.pathEnded = false;
-    return true;
-  }
-
   /** Lane the vehicle is on, or entering when inside a junction. */
   currentLane(v: Vehicle): number {
     if (v.mode === 'conn') return this.city.connectors[v.conn]!.to;
@@ -269,6 +252,18 @@ export class TrafficSystem {
     for (const e of this.occ[v.lane]!) {
       if (e.v === v) continue;
       if (e.pos > v.s - 16 && e.pos - e.v.length < v.s + 4) return false;
+    }
+    return true;
+  }
+
+  /** No vehicle on the lane (driving, pulled over or turning into it) with its body within `room` metres of `s`. */
+  isLaneFree(laneId: number, s: number, room: number): boolean {
+    for (const o of this.vehicles) {
+      let front: number;
+      if ((o.mode === 'lane' || o.mode === 'pulled') && o.lane === laneId) front = o.s;
+      else if (o.mode === 'conn' && this.city.connectors[o.conn]!.to === laneId) front = o.s - this.city.connectors[o.conn]!.line.length;
+      else continue;
+      if (front > s - room && front - o.length < s + room) return false;
     }
     return true;
   }

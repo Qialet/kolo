@@ -20,13 +20,15 @@ function fleet(n: number): FleetVehicleSeed[] {
 const REAL = new URL('../../../../data/districts/belgrade-center.json', import.meta.url);
 const city = buildCityFromDistrict(JSON.parse(readFileSync(REAL, 'utf8')) as District);
 const buildCity = () => city;
+/** Thursday 22 Oct 2026, 15:30 in Belgrade: the timetable runs at full weekday strength. */
+const AFTERNOON = Date.UTC(2026, 9, 22, 13, 30);
 
 describe('Simulation', () => {
   it('runs fifteen minutes of city life without collisions, NaNs or gridlock', () => {
     const city = buildCity();
     const events: string[] = [];
     expect(city.busStops.length).toBeGreaterThan(100);
-    const sim = new Simulation(city, fleet(60), { hooks: { onOrderEvent: (_o, e) => events.push(e.type) } });
+    const sim = new Simulation(city, fleet(60), { startAt: AFTERNOON, hooks: { onOrderEvent: (_o, e) => events.push(e.type) } });
     let overlaps = 0;
     let checks = 0;
     for (let i = 0; i < 900 * 20; i++) {
@@ -65,6 +67,7 @@ describe('Simulation', () => {
     const city = buildCity();
     let completedMeters = 0;
     const sim = new Simulation(city, fleet(8), {
+      startAt: AFTERNOON,
       trafficDensity: 0.2,
       demand: 0,
       hooks: { onOrderEvent: (o, e) => e.type === 'COMPLETED' && (completedMeters = o.distanceMeters) },
@@ -95,7 +98,7 @@ describe('Simulation', () => {
 
   it('sends a taxi to the service box and back on line on admin command', () => {
     const city = buildCity();
-    const sim = new Simulation(city, fleet(6), { trafficDensity: 0.2, demand: 0 });
+    const sim = new Simulation(city, fleet(6), { startAt: AFTERNOON, trafficDensity: 0.2, demand: 0 });
     sim.setFleetStatus('T1', 'MAINTENANCE');
     let reached = false;
     for (let i = 0; i < 20 * 900 && !reached; i++) {
@@ -115,7 +118,7 @@ describe('Simulation', () => {
   it('takes orders from bus stops in the core network', () => {
     const city = buildCity();
     const pickups: string[] = [];
-    const sim = new Simulation(city, fleet(20), { trafficDensity: 0.1, demand: 40, hooks: { onOrderCreated: (o, src) => src === 'BUS_STOP' && pickups.push(o.pickup.addressId) } });
+    const sim = new Simulation(city, fleet(20), { startAt: AFTERNOON, trafficDensity: 0.1, demand: 40, hooks: { onOrderCreated: (o, src) => src === 'BUS_STOP' && pickups.push(o.pickup.addressId) } });
     for (let i = 0; i < 20 * 120; i++) sim.step(0.05);
     expect(pickups.length).toBeGreaterThan(5);
     const stopIds = new Set(city.busStops.map((s) => s.id));

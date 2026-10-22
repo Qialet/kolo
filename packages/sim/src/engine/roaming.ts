@@ -44,7 +44,7 @@ export class Roaming {
       const lane = this.city.lanes[laneId]!;
       if (this.city.segments[lane.seg]!.psvOnly) continue;
       const s = initial ? this.rng.range(Math.min(6, lane.length / 2), Math.max(Math.min(6, lane.length / 2), lane.length - 10)) : 1;
-      if (initial ? this.crowded(laneId, s) : !this.traffic.isLaneStartFree(laneId, 9)) continue;
+      if (initial ? !this.traffic.isLaneFree(laneId, s, 14) : !this.traffic.isLaneStartFree(laneId, 9)) continue;
       const v = makeVehicle(`C${++this.seq}`, 'CAR', this.rng);
       this.traffic.placeOnLane(v, laneId, s);
       v.speed = this.city.segments[lane.seg]!.speed * 0.5;
@@ -90,9 +90,5 @@ export class Roaming {
 
   private destination() {
     return this.rng.chance(LEAVE_SHARE) && this.exits.length ? this.rng.pick(this.exits) : this.rng.pick(this.core);
-  }
-
-  private crowded(laneId: number, s: number) {
-    return this.traffic.vehicles.some((o) => (o.mode === 'lane' || o.mode === 'pulled') && o.lane === laneId && Math.abs(o.s - s) < 14);
   }
 }
