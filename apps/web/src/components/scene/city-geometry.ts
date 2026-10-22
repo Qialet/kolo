@@ -1,6 +1,7 @@
 import { poseAlong, type AreaKind, type Building, type City, type Lane, type Vec2 } from '@kolo/sim';
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { chunkCells } from '@/lib/lod';
 import { palette } from '@/lib/palette';
 
 const tmpColor = new THREE.Color();
@@ -344,43 +345,64 @@ export function extrudeBuilding(b: Building): THREE.BufferGeometry {
   return g;
 }
 
-/**
- * All buildings in one mesh: a vertical colour gradient, the storey height per vertex for the
- * window shader, and the first triangle of every building for picking.
- */
-export function buildBuildingGeometry(city: City) {
-  const started = performance.now();
-  const parts: THREE.BufferGeometry[] = [];
-  const firstTriangle = new Uint32Array(city.buildings.length + 1);
-  let triangles = 0;
-  const base = new THREE.Color(palette.buildingBase);
-  city.buildings.forEach((b, i) => {
-    firstTriangle[i] = triangles;
-    const extruded = extrudeBuilding(b);
-    const g = extruded.index ? extruded.toNonIndexed() : extruded;
-    g.deleteAttribute('uv');
-    g.computeVertexNormals();
-    const pos = g.attributes.position!;
-    const colors = new Float32Array(pos.count * 3);
-    const floors = new Float32Array(pos.count).fill(b.h / Math.max(1, b.levels));
-    const top = new THREE.Color(buildingTint(b));
-    for (let k = 0; k < pos.count; k++) {
-      tmpColor.copy(base).lerp(top, Math.min(1, (pos.getY(k) - LEVEL.ground) / Math.max(1, b.h)));
-      colors.set([tmpColor.r, tmpColor.g, tmpColor.b], k * 3);
-    }
-    g.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-    g.setAttribute('floorH', new THREE.BufferAttribute(floors, 1));
-    triangles += pos.count / 3;
-    parts.push(g);
-  });
-  firstTriangle[city.buildings.length] = triangles;
-  const geometry = parts.length ? mergeGeometries(parts) : new THREE.BufferGeometry();
-  for (const p of parts) p.dispose();
-  if (!geometry) throw new Error('Could not merge buildings');
-  return { geometry, firstTriangle, triangles, ms: Math.round(performance.now() - started) };
+export interface BuildingChunk {
+  key: string;
+  geometry: THREE.BufferGeometry;
+  /** City building indexes in this chunk, in mesh order. */
+  buildings: number[];
+  /** First triangle of every building of the chunk, plus the total, for picking. */
+  firstTriangle: Uint32Array;
 }
 
-/** Index of the building that owns a triangle of the merged mesh. */
+/**
+ * Buildings merged per chunk (by the centroid of the footprint, so each building lands in exactly
+ * one): a vertical colour gradient, the storey height per vertex for the window shader, and the
+ * first triangle of every building for picking.
+ */
+export function buildBuildingChunks(city: City) {
+  const started = performance.now();
+  const centroids = city.buildings.map((b) => ({
+    x: b.outline.reduce((a, p) => a + p.x, 0) / b.outline.length,
+    z: b.outline.reduce((a, p) => a + p.z, 0) / b.outline.length,
+  }));
+  const base = new THREE.Color(palette.buildingBase);
+  let triangles = 0;
+  const chunks: BuildingChunk[] = chunkCells(centroids).map((cell) => {
+    const parts: THREE.BufferGeometry[] = [];
+    const firstTriangle = new Uint32Array(cell.items.length + 1);
+    let own = 0;
+    cell.items.forEach((index, i) => {
+      const b = city.buildings[index]!;
+      firstTriangle[i] = own;
+      const extruded = extrudeBuilding(b);
+      const g = extruded.index ? extruded.toNonIndexed() : extruded;
+      g.deleteAttribute('uv');
+      g.computeVertexNormals();
+      const pos = g.attributes.position!;
+      const colors = new Float32Array(pos.count * 3);
+      const floors = new Float32Array(pos.count).fill(b.h / Math.max(1, b.levels));
+      const top = new THREE.Color(buildingTint(b));
+      for (let k = 0; k < pos.count; k++) {
+        tmpColor.copy(base).lerp(top, Math.min(1, (pos.getY(k) - LEVEL.ground) / Math.max(1, b.h)));
+        colors.set([tmpColor.r, tmpColor.g, tmpColor.b], k * 3);
+      }
+      g.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+      g.setAttribute('floorH', new THREE.BufferAttribute(floors, 1));
+      own += pos.count / 3;
+      parts.push(g);
+    });
+    firstTriangle[cell.items.length] = own;
+    triangles += own;
+    const geometry = mergeGeometries(parts);
+    for (const p of parts) p.dispose();
+    if (!geometry) throw new Error('Could not merge buildings');
+    geometry.computeBoundingSphere();
+    return { key: cell.key, geometry, buildings: cell.items, firstTriangle };
+  });
+  return { chunks, triangles, ms: Math.round(performance.now() - started) };
+}
+
+/** Index within its chunk of the building that owns a triangle of the chunk mesh. */
 export function buildingOfTriangle(firstTriangle: Uint32Array, face: number): number {
   let lo = 0;
   let hi = firstTriangle.length - 2;

@@ -9,7 +9,7 @@ import { chunkCells } from '@/lib/lod';
 import { useUi } from '@/lib/ui-store';
 import { ChunkedInstances, type InstancePart } from './chunked';
 import {
-  buildBuildingGeometry,
+  buildBuildingChunks,
   buildDepotGeometry,
   buildGroundGeometry,
   buildingOfTriangle,
@@ -18,6 +18,7 @@ import {
   buildRoadGeometry,
   buildTrackGeometry,
   buildWireGeometry,
+  type BuildingChunk,
   flatPolygon,
   LEVEL,
   platformOf,
@@ -74,33 +75,46 @@ function Ground({ city }: { city: City }) {
 }
 
 function Buildings({ city }: { city: City }) {
-  const { geometry, firstTriangle, triangles, ms } = useMemo(() => buildBuildingGeometry(city), [city]);
+  const { chunks, triangles, ms } = useMemo(() => buildBuildingChunks(city), [city]);
   useEffect(() => {
-    if (process.env.NODE_ENV !== 'production') console.info(`[kolo] buildings: ${city.buildings.length}, ${triangles} triangles, ${ms} ms`);
-  }, [city, triangles, ms]);
-  const material = useMemo(() => withWindows(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0 })), []);
+    if (process.env.NODE_ENV !== 'production') console.info(`[kolo] buildings: ${city.buildings.length} in ${chunks.length} chunks, ${triangles} triangles, ${ms} ms`);
+  }, [city, chunks, triangles, ms]);
+  // Window rows turn to moiré from afar: the far level paints plain walls.
+  const materials = useMemo(
+    () => ({
+      near: withWindows(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0 })),
+      far: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0 }),
+    }),
+    [],
+  );
+  const lod = useUi((s) => s.lod);
   const select = useUi((s) => s.select);
   const hover = useUi((s) => s.hover);
-  const buildingAt = (e: ThreeEvent<PointerEvent | MouseEvent>) =>
-    e.faceIndex !== undefined && e.faceIndex !== null ? city.buildings[buildingOfTriangle(firstTriangle, e.faceIndex)] : undefined;
+  const buildingAt = (chunk: BuildingChunk, e: ThreeEvent<PointerEvent | MouseEvent>) =>
+    e.faceIndex !== undefined && e.faceIndex !== null ? city.buildings[chunk.buildings[buildingOfTriangle(chunk.firstTriangle, e.faceIndex)]!] : undefined;
   return (
-    <mesh
-      geometry={geometry}
-      material={material}
-      castShadow
-      receiveShadow
-      onClick={(e) => {
-        e.stopPropagation();
-        const b = buildingAt(e);
-        if (b) select({ kind: 'building', id: b.id });
-      }}
-      onPointerMove={(e) => {
-        e.stopPropagation();
-        const b = buildingAt(e);
-        hover(b ? `building:${b.id}` : null);
-      }}
-      onPointerOut={() => hover(null)}
-    />
+    <group>
+      {chunks.map((chunk) => (
+        <mesh
+          key={chunk.key}
+          geometry={chunk.geometry}
+          material={materials[lod]}
+          castShadow
+          receiveShadow
+          onClick={(e) => {
+            e.stopPropagation();
+            const b = buildingAt(chunk, e);
+            if (b) select({ kind: 'building', id: b.id });
+          }}
+          onPointerMove={(e) => {
+            e.stopPropagation();
+            const b = buildingAt(chunk, e);
+            hover(b ? `building:${b.id}` : null);
+          }}
+          onPointerOut={() => hover(null)}
+        />
+      ))}
+    </group>
   );
 }
 
