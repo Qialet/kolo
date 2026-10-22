@@ -179,6 +179,29 @@ describe('importGtfs on a synthetic feed', () => {
     ]);
   });
 
+  it('splits a trip that leaves the frame between two stops into a leaving and an entering pattern', () => {
+    const f = feed();
+    f['trips.txt'] += '\nT02,RD,tram2,Nazad,,1,,,0';
+    f['stop_times.txt'] += times('tram2', [['S3', T, T], ['S7', T + 300, T + 300], ['S5', T + 600, T + 660]]).join('\n') + '\n';
+    const split = importGtfs(f, box);
+    const line = split.lines.findIndex((l) => l.id === 'T02');
+    const id = (i: number) => split.stops[i]!.id;
+    const back = split.patterns.filter((q) => q.line === line && q.dir === 1);
+    expect(back.map((q) => [q.stops.map(id), q.enter, q.exit])).toEqual([
+      [['S3'], false, true],
+      [['S5'], true, false],
+    ]);
+    const [out, inn] = back.map((q) => q.profiles[0]!);
+    expect(out!.starts).toEqual({ RD: [T] });
+    expect(out!.exit).toBeGreaterThan(0);
+    expect(out!.exit).toBeLessThan(300);
+    // The second piece keeps its own clock: time 0 is its departure from S5.
+    expect(inn!.t).toEqual([-60, 0]);
+    expect(inn!.starts).toEqual({ RD: [T + 660] });
+    expect(inn!.enter).toBeLessThan(-60);
+    expect(inn!.enter).toBeGreaterThan(-360);
+  });
+
   it('falls back to a polyline through the stops when a trip has no shape', () => {
     const line = tr.lines.findIndex((l) => l.id === 'TR40');
     const p = tr.patterns.find((q) => q.line === line)!;

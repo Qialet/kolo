@@ -246,18 +246,25 @@ export function importGtfs(files: Record<string, string>, bbox: BBoxDeg): Distri
   };
 }
 
-/** Adds one trip (its kept stop_times rows) to its pattern and raw profile. */
+/**
+ * Adds one trip (its kept stop_times rows) to its patterns and raw profiles: one pattern per run of stops
+ * inside the frame, so a trip that leaves the frame between two stops (a turning loop outside) leaves and
+ * comes back in as two pieces.
+ */
 function addTrip(trip: TripInfo, rows: StopTime[], stops: Map<string, StopInfo>, patterns: Map<string, PatternAcc>): void {
   rows.sort((a, b) => a.seq - b.seq);
-  let fi = -1;
-  let li = -1;
-  rows.forEach((r, i) => {
-    if (!stops.get(r.stop)!.inside) return;
-    if (fi < 0) fi = i;
-    li = i;
-  });
-  if (fi < 0) return;
-  const inside = rows.slice(fi, li + 1).filter((r) => stops.get(r.stop)!.inside);
+  for (let fi = 0; fi < rows.length; fi++) {
+    if (!stops.get(rows[fi]!.stop)!.inside) continue;
+    let li = fi;
+    while (li + 1 < rows.length && stops.get(rows[li + 1]!.stop)!.inside) li++;
+    addRun(trip, rows, fi, li, patterns);
+    fi = li;
+  }
+}
+
+/** Adds the in-frame run rows[fi..li] of a trip; its outside neighbours give the frame crossings. */
+function addRun(trip: TripInfo, rows: StopTime[], fi: number, li: number, patterns: Map<string, PatternAcc>): void {
+  const inside = rows.slice(fi, li + 1);
   const dep0 = rows[fi]!.dep;
   const enter = fi > 0;
   const exit = li < rows.length - 1;
