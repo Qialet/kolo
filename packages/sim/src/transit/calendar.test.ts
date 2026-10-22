@@ -26,13 +26,17 @@ describe('orthodoxEaster', () => {
 describe('serbianHolidays', () => {
   it('2024 Monday-Saturday holidays', () => {
     const want = ['0101', '0102', '0215', '0216', '0501', '0502', '0503', '0506', '1111'].map((d) => '2024' + d);
-    expect(workdayHolidays(2024).filter((d) => want.includes(d)).sort()).toEqual(want);
+    expect(workdayHolidays(2024).sort()).toEqual(want);
   });
-  it('2025 holidays with Sunday substitution', () => {
-    const h = serbianHolidays(2025);
-    for (const d of ['0101', '0102', '0107', '0215', '0217', '0418', '0421', '0501', '0502']) {
-      expect(h.has('2025' + d)).toBe(true);
-    }
+  it('2025 Monday-Saturday holidays are exactly the expected set', () => {
+    const want = ['0101', '0102', '0107', '0215', '0217', '0418', '0421', '0501', '0502', '1111'].map((d) => '2025' + d);
+    expect(workdayHolidays(2025).sort()).toEqual(want);
+  });
+  it('2022 May Day on Sunday moves to 3 May', () => {
+    const h = serbianHolidays(2022);
+    expect(h.has('20220502')).toBe(true);
+    expect(h.has('20220503')).toBe(true);
+    expect(h.has('20220504')).toBe(false);
   });
   it('2023 New Year on Sunday moves to 3 January', () => {
     const h = serbianHolidays(2023);

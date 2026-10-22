@@ -87,11 +87,19 @@ export function serbianHolidays(year: number): Map<string, string> {
   return out;
 }
 
+const holidayCache = new Map<number, Map<string, string>>();
+
+function holidaysOf(year: number): Map<string, string> {
+  let h = holidayCache.get(year);
+  if (!h) holidayCache.set(year, (h = serbianHolidays(year)));
+  return h;
+}
+
 /** Id сервиса на дату: добавочный, иначе праздник — как воскресенье, иначе по дню недели. */
 export function serviceFor(date: string, cal: TransitCalendar): string {
   for (const [d, s] of cal.extra) if (d === date) return s;
   const year = Number(date.slice(0, 4));
   const ms = Date.UTC(year, Number(date.slice(4, 6)) - 1, Number(date.slice(6, 8)));
-  if (serbianHolidays(year).has(date)) return cal.week[0]!;
+  if (holidaysOf(year).has(date)) return cal.week[0]!;
   return cal.week[new Date(ms).getUTCDay()]!;
 }
