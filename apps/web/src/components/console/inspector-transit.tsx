@@ -151,10 +151,14 @@ export function StopInspector({ id }: { id: string }) {
       <Separator />
       <Section title="Спрос">
         <p className="mb-2 text-[12px] text-muted-foreground">Около 40% заказов в районе создаётся у остановок — свободные такси дежурят неподалёку.</p>
-        <Button size="sm" className="w-full" onClick={() => openCreate({ pickupId: stop.id })}>
-          <MapPinIcon data-icon="inline-start" />
-          Заказ от остановки
-        </Button>
+        {data?.pickup === false ? (
+          <p className="text-[12px] text-muted-foreground">Такси сюда не подъезжают: остановка на выделенной или транзитной полосе.</p>
+        ) : (
+          <Button size="sm" className="w-full" disabled={!data} onClick={() => openCreate({ pickupId: stop.id })}>
+            <MapPinIcon data-icon="inline-start" />
+            Заказ от остановки
+          </Button>
+        )}
       </Section>
     </>
   );

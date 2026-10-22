@@ -26,6 +26,7 @@ import {
   type TaxiDetail,
 } from '@kolo/contracts';
 import { lanePoint } from '../city/lanes.js';
+import { stopPickup } from '../city/transit-places.js';
 import type { City, CurbRef, Depot, Slot } from '../city/types.js';
 import { dist, type Vec2 } from '../geometry.js';
 import { createRng, type Rng } from '../rng.js';
@@ -142,8 +143,6 @@ const HOTSPOT_WEIGHT = 2;
 const BASE_ORDERS_PER_MIN = 3.2;
 const FARE = { start: 230, perKm: 95, perMin: 18 };
 const SUBSTEP = 0.05;
-/** Shortest curb lane a stop pick-up point fits on (8 m clear at both ends, 20 m short of the shelter). */
-const STOP_PLACE_LANE = 32;
 
 export class Simulation {
   readonly traffic: TrafficSystem;
@@ -185,9 +184,7 @@ export class Simulation {
     for (const a of city.addresses) this.places.set(a.id, { id: a.id, label: a.label, lane: a.lane, s: a.s, x: a.x, z: a.z });
     for (const st of city.busStops) {
       // Taxis wait short of the shelter, and only where they may drive and stop.
-      const lane = city.lanes[st.lane]!;
-      const seg = city.segments[lane.seg]!;
-      if (!seg.core || seg.psvOnly || lane.length < STOP_PLACE_LANE) continue;
+      if (!stopPickup(city, st)) continue;
       const place = { id: st.id, label: `Остановка «${st.name}»`, lane: st.lane, s: Math.max(8, st.s - 20), x: st.x, z: st.z };
       this.places.set(st.id, place);
       this.stopPlaces.push(place);
@@ -1047,7 +1044,7 @@ export class Simulation {
     }
     departures.sort((a, b) => a.expectedAt - b.expectedAt);
     const lines = this.city.busLines.filter((l) => stop.lines.includes(l.id)).map((l) => ({ id: l.id, name: l.name, color: l.color, textColor: l.textColor, mode: l.mode }));
-    return { id, code: stop.code, name: stop.name, x: round(stop.x), z: round(stop.z), lines, departures: departures.slice(0, STOP_DEPARTURES) };
+    return { id, code: stop.code, name: stop.name, x: round(stop.x), z: round(stop.z), lines, pickup: this.places.has(id), departures: departures.slice(0, STOP_DEPARTURES) };
   }
 
   /** A line by direction: its main variant's stops and route, headway and next departure within the hour. */

@@ -2,6 +2,7 @@
 
 import { useMutation } from '@tanstack/react-query';
 import { ChevronsUpDownIcon } from 'lucide-react';
+import { stopPickup } from '@kolo/sim';
 import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
@@ -26,7 +27,7 @@ function usePlaces(): PlaceOption[] {
     const city = getCity();
     const poiIds = new Set(city.pois.map((p) => p.addressId));
     const pois = city.addresses.filter((a) => poiIds.has(a.id)).map((a) => ({ id: a.id, label: a.label, group: 'Точки притяжения' as const }));
-    const stops = city.busStops.map((s) => ({ id: s.id, label: `Остановка «${s.name}»`, group: 'Остановки' as const }));
+    const stops = city.busStops.filter((s) => stopPickup(city, s)).map((s) => ({ id: s.id, label: `Остановка «${s.name}»`, group: 'Остановки' as const }));
     const addresses = city.addresses
       .filter((a) => !poiIds.has(a.id))
       .map((a) => ({ id: a.id, label: a.label, group: 'Адреса' as const }))

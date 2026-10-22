@@ -169,6 +169,8 @@ export interface StopDetail {
   x: number;
   z: number;
   lines: { id: string; name: string; color: string; textColor: string; mode: TransitMode }[];
+  /** Taxis can pull up here (the stop is on a curb lane of the core network). */
+  pickup: boolean;
   /** Up to 8 departures within the next hour. */
   departures: StopDeparture[];
 }

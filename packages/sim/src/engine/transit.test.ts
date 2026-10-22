@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { isTransitKind } from '@kolo/contracts';
 import type { District } from '../city/district.js';
 import { buildCityFromDistrict } from '../city/district-build.js';
+import { stopPickup } from '../city/transit-places.js';
 import { createRng } from '../rng.js';
 import { Simulation, type FleetVehicleSeed } from './simulation.js';
 import { makeVehicle, TrafficSystem } from './traffic.js';
@@ -201,6 +202,16 @@ describe('transit details for the console', () => {
     }
     expect(d.departures.some((x) => x.vehicleId)).toBe(true);
     expect(sim.stopDetail('nope')).toBeNull();
+  });
+
+  it('offers a taxi pick-up only at stops taxis can reach', () => {
+    const flags = city.busStops.map((st) => sim.stopDetail(st.id)!.pickup);
+    expect(flags.filter(Boolean).length).toBeGreaterThan(50);
+    expect(flags.some((x) => !x)).toBe(true);
+    city.busStops.forEach((st, i) => {
+      expect(flags[i]).toBe(sim.place(st.id) !== undefined);
+      expect(stopPickup(city, st)).toBe(flags[i]);
+    });
   });
 
   it('lists only trips that leave a terminus, not those ending there', () => {

@@ -3,7 +3,7 @@ import { segmentDistance } from '../import/polygons.js';
 import type { DistrictStop, DistrictTransit } from './district.js';
 import { lanePoint } from './lanes.js';
 import { SegmentGrid } from './places.js';
-import type { City, Lane } from './types.js';
+import type { BusStop, City, Lane } from './types.js';
 
 const STOP_REACH = 30;
 /** Lane direction may differ from the stop's direction of travel by at most 60°. */
@@ -43,6 +43,16 @@ export function bindStop(grid: SegmentGrid<{ lane: Lane; s0: number }>, stop: Di
   }
   if (!best) return null;
   return { lane: best.lane, s: Math.max(STOP_START, Math.min(best.lane.length - STOP_END, best.s)) };
+}
+
+/** Shortest curb lane a stop pick-up point fits on (8 m clear at both ends, 20 m short of the shelter). */
+const PICKUP_LANE = 32;
+
+/** Whether taxis can pull up at a stop: a long enough curb lane of the core network that cars may use. */
+export function stopPickup(city: City, stop: BusStop): boolean {
+  const lane = city.lanes[stop.lane]!;
+  const seg = city.segments[lane.seg]!;
+  return !!seg.core && !seg.psvOnly && lane.length >= PICKUP_LANE;
 }
 
 /** Lines of the district and its stops bound to curb lanes; stops without a fitting lane are left out. */
