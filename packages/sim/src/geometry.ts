@@ -43,11 +43,22 @@ export interface Pose {
   heading: number;
 }
 
+/** Index of the end point of the piece holding arc length `s`: the first i ≥ 1 with cum[i] ≥ s, at most the last point. */
+function pieceAt(cum: number[], s: number): number {
+  let lo = 1;
+  let hi = cum.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if ((cum[mid] as number) < s) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
 export function poseAt(line: Polyline, s: number): Pose {
   const { points, cum } = line;
   const clamped = Math.max(0, Math.min(line.length, s));
-  let i = 1;
-  while (i < points.length - 1 && (cum[i] as number) < clamped) i++;
+  const i = pieceAt(cum, clamped);
   const a = points[i - 1] as Vec2;
   const b = points[i] as Vec2;
   const segLen = (cum[i] as number) - (cum[i - 1] as number) || 1;
@@ -61,8 +72,7 @@ export function poseAt(line: Polyline, s: number): Pose {
  */
 export function poseAlong(line: Polyline, s: number, lateral = 0): Pose {
   const { points, cum } = line;
-  let i = 1;
-  while (i < points.length - 1 && (cum[i] as number) < s) i++;
+  const i = pieceAt(cum, s);
   const a = points[i - 1] as Vec2;
   const b = points[i] as Vec2;
   const segLen = (cum[i] as number) - (cum[i - 1] as number) || 1;
