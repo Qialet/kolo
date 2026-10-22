@@ -20,7 +20,8 @@ export type SegmentCost = (seg: Segment) => number;
  * Shortest path over the lane graph (lanes joined by junction connectors), returned as the chain of
  * segments it crosses, from `fromSeg` to `toSeg` inclusive. It starts on lane `fromLaneIndex` of
  * `fromSeg` and ends on lane `toLane` (any lane of `toSeg` when -1), so the chain is always drivable
- * lane by lane. Bus-only segments are skipped unless `allowPsv` (or they are the destination).
+ * lane by lane; a negative `fromLaneIndex` starts from whichever lane of `fromSeg` suits best (a bus
+ * merging out of a stop). Bus-only segments are skipped unless `allowPsv` (or they are the destination).
  * When `toSeg === fromSeg` the result is a loop of at least one hop.
  */
 export function routeSegments(
@@ -34,7 +35,8 @@ export function routeSegments(
 ): number[] | null {
   const { lanes, connectors, segments } = city;
   const start = segments[fromSeg]!;
-  const startLane = start.lanes[Math.min(fromLaneIndex, start.lanes.length - 1)]!;
+  const starts = fromLaneIndex < 0 ? start.lanes : [start.lanes[Math.min(fromLaneIndex, start.lanes.length - 1)]!];
+  const isStart = (lane: number) => starts.includes(lane);
   const cost = new Float64Array(lanes.length).fill(Infinity);
   const prev = new Int32Array(lanes.length).fill(-1);
   const heap = new LaneHeap(cost);
@@ -50,7 +52,7 @@ export function routeSegments(
       heap.push(lane.id);
     }
   };
-  for (const connId of lanes[startLane]!.out) relax(startLane, 0, connId);
+  for (const lane of starts) for (const connId of lanes[lane]!.out) relax(lane, 0, connId);
   let found = -1;
   while (heap.size) {
     const cur = heap.pop();
@@ -66,10 +68,10 @@ export function routeSegments(
   let cur = found;
   for (let guard = 0; guard <= lanes.length; guard++) {
     chain.push(lanes[cur]!.seg);
-    if (cur === startLane && chain.length > 1) break;
+    if (isStart(cur) && chain.length > 1) break;
     const p = prev[cur]!;
     if (p < 0) return null;
-    if (p === startLane) {
+    if (isStart(p)) {
       chain.push(fromSeg);
       break;
     }
