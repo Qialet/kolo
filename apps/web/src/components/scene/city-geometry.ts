@@ -420,3 +420,33 @@ export function withWindows(material: THREE.MeshStandardMaterial) {
   material.customProgramCacheKey = () => 'kolo-windows-v2';
   return material;
 }
+
+/** Overhead trolleybus wires: a pair of lines 5.6 m up over the curb lanes of wired streets and the turns between them. */
+export function buildWireGeometry(city: City): THREE.BufferGeometry {
+  const pos: number[] = [];
+  const curbOf = (seg: number) => {
+    const s = city.segments[seg]!;
+    return s.lanes[s.lanes.length - 1]!;
+  };
+  const wired = new Set(city.segments.filter((s) => s.trolley).map((s) => curbOf(s.id)));
+  const string = (line: Lane['line']) => {
+    for (const side of [-WIRE_SPREAD, WIRE_SPREAD]) {
+      let prev = poseAlong(line, 0, side);
+      for (let s = WIRE_STEP; s < line.length + WIRE_STEP; s += WIRE_STEP) {
+        const p = poseAlong(line, Math.min(s, line.length), side);
+        pos.push(prev.x, WIRE_HEIGHT, prev.z, p.x, WIRE_HEIGHT, p.z);
+        prev = p;
+      }
+    }
+  };
+  for (const id of wired) string(city.lanes[id]!.line);
+  for (const c of city.connectors) if (wired.has(c.from) && wired.has(c.to)) string(c.line);
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  return g;
+}
+
+const WIRE_HEIGHT = 5.6;
+/** Half the distance between the two wires of a pair. */
+const WIRE_SPREAD = 0.3;
+const WIRE_STEP = 4;

@@ -1,7 +1,7 @@
 'use client';
 
 import { useFrame, type ThreeEvent } from '@react-three/fiber';
-import { TAXI_ACTIVITIES } from '@kolo/contracts';
+import { TAXI_ACTIVITIES, VEHICLE_KINDS } from '@kolo/contracts';
 import type { City } from '@kolo/sim';
 import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
@@ -15,9 +15,9 @@ import { useUi } from '@/lib/ui-store';
 /** Latest interpolated poses by id, shared with overlays (labels, routes, camera follow). */
 export const livePoses = new Map<string, VehiclePose>();
 
-const MAX = { taxi: 64, car: 160, bus: 16 };
+const MAX = { taxi: 64, car: 160, bus: 260, trolley: 60, minibus: 24 };
 const HALO_PULSE = 2.4;
-const KIND = { TAXI: 0, CAR: 1, BUS: 2 } as const;
+const KIND = Object.fromEntries(VEHICLE_KINDS.map((k, i) => [k, i])) as Record<(typeof VEHICLE_KINDS)[number], number>;
 
 const tmp = new THREE.Object3D();
 /** Moving instances: raycasting must not rely on a bounding sphere cached at first use. */
@@ -62,21 +62,49 @@ function useGeometries() {
     const carWheels = wheels(0.84, [-1.35, 1.35], 0.33);
     const tails = mergeGeometries([box(0.42, 0.16, 0.06, -0.58, 0.8, -2.2, 0.03), box(0.42, 0.16, 0.06, 0.58, 0.8, -2.2, 0.03)])!;
     const sign = box(0.78, 0.24, 0.34, 0, 1.62, -0.2, 0.06);
-    const busBody = box(2.5, 2.5, 11.8, 0, 1.6, 0, 0.3);
-    const busGlass = box(2.56, 0.95, 11.2, 0, 2.15, 0.1, 0.12);
-    const busRoof = box(2.2, 0.16, 9.5, 0, 2.94, 0, 0.06);
-    const busWheels = wheels(1.08, [-3.9, 3.9], 0.5);
-    const busTails = mergeGeometries([box(0.4, 0.3, 0.06, -0.9, 0.9, -5.92, 0.03), box(0.4, 0.3, 0.06, 0.9, 0.9, -5.92, 0.03)])!;
     const halo = new THREE.RingGeometry(3.4, 4.3, 40);
-    return { carBody, carCabin, carWheels, tails, sign, busBody, busGlass, busRoof, busWheels, busTails, halo };
+    const coach = (length: number, height: number, axles: number[], wheel: number): Record<string, THREE.BufferGeometry> => ({
+      Body: box(2.5, height, length - 0.2, 0, 0.35 + height / 2, 0, 0.3),
+      Glass: box(2.56, 0.95, length - 0.8, 0, 0.35 + height - 0.8, 0.1, 0.12),
+      Roof: box(2.2, 0.16, length * 0.8, 0, 0.35 + height + 0.09, 0, 0.06),
+      Wheels: wheels(1.08, axles, wheel),
+      Tails: mergeGeometries([box(0.4, 0.3, 0.06, -0.9, 0.9, -length / 2 + 0.08, 0.03), box(0.4, 0.3, 0.06, 0.9, 0.9, -length / 2 + 0.08, 0.03)])!,
+    });
+    const transit: Record<TransitGroup, Record<string, THREE.BufferGeometry>> = {
+      bus: coach(12, 2.5, [-3.9, 3.9], 0.5),
+      trolley: { ...coach(12, 2.5, [-3.9, 3.9], 0.5), Poles: trolleyPoles() },
+      minibus: coach(7.5, 2.3, [-2.4, 2.4], 0.42),
+    };
+    return { carBody, carCabin, carWheels, tails, sign, halo, transit };
   }, []);
 }
 
-type Group = 'taxi' | 'car' | 'bus';
+/** Two trolley poles from the roof back up to the wires 5.6 m above the street (model space, before the 1.15 upscale). */
+function trolleyPoles() {
+  const from = { y: 3.05, z: 1.6 };
+  const to = { y: (5.6 - 0.2) / 1.15, z: -3.9 };
+  const len = Math.hypot(to.y - from.y, to.z - from.z);
+  const tilt = Math.atan2(to.y - from.y, from.z - to.z);
+  const parts = [-0.35, 0.35].map((x) => {
+    const g = new THREE.BoxGeometry(0.07, 0.07, len);
+    g.rotateX(tilt);
+    g.translate(x, (from.y + to.y) / 2, (from.z + to.z) / 2);
+    return g;
+  });
+  return mergeGeometries(parts)!;
+}
+
+type TransitGroup = 'bus' | 'trolley' | 'minibus';
+type Group = 'taxi' | 'car' | TransitGroup;
+const TRANSIT: readonly TransitGroup[] = ['bus', 'trolley', 'minibus'];
+const COACH_PARTS = ['Body', 'Glass', 'Roof', 'Wheels', 'Tails'] as const;
+type TransitPart = `${TransitGroup}${(typeof COACH_PARTS)[number] | 'Poles'}`;
+const partsOf = (group: TransitGroup): TransitPart[] => [...COACH_PARTS, ...(group === 'trolley' ? (['Poles'] as const) : [])].map((p) => `${group}${p}` as const);
 type Part =
   | 'taxiBody' | 'taxiCabin' | 'taxiWheels' | 'taxiTails' | 'taxiSign' | 'taxiHalo'
   | 'carBody' | 'carCabin' | 'carWheels' | 'carTails'
-  | 'busBody' | 'busGlass' | 'busRoof' | 'busWheels' | 'busTails';
+  | TransitPart;
+const TRANSIT_COLOR: Record<TransitGroup, string> = { bus: palette.bus, trolley: palette.trolley, minibus: palette.minibus };
 
 /** The single <Vehicles> instance registers its instanced meshes here; only useFrame reads them. */
 const meshes: Partial<Record<Part, THREE.InstancedMesh>> = {};
@@ -93,7 +121,7 @@ const setCursor = (value: string) => {
 export function Vehicles() {
   const g = useGeometries();
   const poses = useRef<VehiclePose[]>([]);
-  const ids = useRef<Record<Group, string[]>>({ taxi: [], car: [], bus: [] });
+  const ids = useRef<Record<Group, string[]>>({ taxi: [], car: [], bus: [], trolley: [], minibus: [] });
 
   const select = useUi((s) => s.select);
   const hover = useUi((s) => s.hover);
@@ -108,13 +136,14 @@ export function Vehicles() {
     // Roughly constant on screen: larger when zoomed out, never smaller than the car.
     const pulse = (1 + Math.sin(clock.elapsedTime * HALO_PULSE) * 0.08) * Math.max(1, 7 / camera.zoom);
     const n = frameBuffer.sample(performance.now(), poses.current);
-    const counts = { taxi: 0, car: 0, bus: 0 };
+    const counts = { taxi: 0, car: 0, bus: 0, trolley: 0, minibus: 0 };
     const idLists = ids.current;
     livePoses.clear();
     for (let i = 0; i < n; i++) {
       const p = poses.current[i]!;
       livePoses.set(p.id, p);
-      const group: Group = p.kind === KIND.TAXI ? 'taxi' : p.kind === KIND.BUS ? 'bus' : 'car';
+      const group: Group =
+        p.kind === KIND.TAXI ? 'taxi' : p.kind === KIND.BUS ? 'bus' : p.kind === KIND.TROLLEY ? 'trolley' : p.kind === KIND.MINIBUS ? 'minibus' : 'car';
       const k = counts[group];
       if (k >= MAX[group]) continue;
       counts[group]++;
@@ -146,8 +175,8 @@ export function Vehicles() {
         meshes.carBody?.setColorAt(k, carColors[hash % carColors.length]!);
         meshes.carTails?.setColorAt(k, braking ? TAIL_ON : TAIL_OFF);
       } else {
-        for (const part of ['busBody', 'busGlass', 'busRoof', 'busWheels', 'busTails'] as const) meshes[part]?.setMatrixAt(k, tmp.matrix);
-        meshes.busTails?.setColorAt(k, braking ? TAIL_ON : TAIL_OFF);
+        for (const part of partsOf(group)) meshes[part]?.setMatrixAt(k, tmp.matrix);
+        meshes[`${group}Tails`]?.setColorAt(k, braking ? TAIL_ON : TAIL_OFF);
       }
     }
     const apply = (group: Group, list: readonly Part[]) => {
@@ -162,7 +191,7 @@ export function Vehicles() {
     };
     apply('taxi', ['taxiBody', 'taxiCabin', 'taxiWheels', 'taxiTails', 'taxiSign'] as const);
     apply('car', ['carBody', 'carCabin', 'carWheels', 'carTails'] as const);
-    apply('bus', ['busBody', 'busGlass', 'busRoof', 'busWheels', 'busTails'] as const);
+    for (const group of TRANSIT) apply(group, partsOf(group));
     const halo = meshes.taxiHalo;
     if (halo) {
       halo.count = halos;
@@ -175,7 +204,7 @@ export function Vehicles() {
     e.stopPropagation();
     const id = e.instanceId !== undefined ? ids.current[group][e.instanceId] : undefined;
     if (!id) return;
-    select(group === 'taxi' ? { kind: 'taxi', id } : group === 'bus' ? { kind: 'bus', id } : { kind: 'car', id });
+    select(group === 'taxi' ? { kind: 'taxi', id } : group === 'car' ? { kind: 'car', id } : { kind: 'bus', id });
   };
   const over = (group: Group) => (e: ThreeEvent<PointerEvent>) => {
     e.stopPropagation();
@@ -198,6 +227,8 @@ export function Vehicles() {
       carBody: withColors(MAX.car, '#FFFFFF'),
       carTails: withColors(MAX.car, '#7A2530'),
       busTails: withColors(MAX.bus, '#7A2530'),
+      trolleyTails: withColors(MAX.trolley, '#7A2530'),
+      minibusTails: withColors(MAX.minibus, '#7A2530'),
     }),
     [],
   );
@@ -239,22 +270,31 @@ export function Vehicles() {
         <meshBasicMaterial toneMapped={false} />
       </instancedMesh>
 
-      {/* Buses: cobalt, the second accent of the city. */}
-      <instancedMesh ref={bind('busBody')} args={[g.busBody, undefined, MAX.bus]} castShadow frustumCulled={false} {...handlers('bus')}>
-        <meshStandardMaterial color={palette.bus} roughness={0.4} />
-      </instancedMesh>
-      <instancedMesh ref={bind('busGlass')} args={[g.busGlass, undefined, MAX.bus]} frustumCulled={false} {...handlers('bus')}>
-        <meshStandardMaterial color="#1B2A4A" roughness={0.2} metalness={0.3} />
-      </instancedMesh>
-      <instancedMesh ref={bind('busRoof')} args={[g.busRoof, undefined, MAX.bus]} frustumCulled={false}>
-        <meshStandardMaterial color="#F4F7FF" roughness={0.6} />
-      </instancedMesh>
-      <instancedMesh ref={bind('busWheels')} args={[g.busWheels, undefined, MAX.bus]} frustumCulled={false}>
-        <meshStandardMaterial color="#20232A" roughness={0.8} />
-      </instancedMesh>
-      <instancedMesh ref={bind('busTails')} args={[g.busTails, undefined, MAX.bus]} frustumCulled={false} instanceColor={c.busTails}>
-        <meshBasicMaterial toneMapped={false} />
-      </instancedMesh>
+      {/* Public transport: buses cobalt (the second accent of the city), trolleybuses teal, minibuses light cobalt. */}
+      {TRANSIT.map((group) => (
+        <group key={group}>
+          <instancedMesh ref={bind(`${group}Body`)} args={[g.transit[group].Body, undefined, MAX[group]]} castShadow frustumCulled={false} {...handlers(group)}>
+            <meshStandardMaterial color={TRANSIT_COLOR[group]} roughness={0.4} />
+          </instancedMesh>
+          <instancedMesh ref={bind(`${group}Glass`)} args={[g.transit[group].Glass, undefined, MAX[group]]} frustumCulled={false} {...handlers(group)}>
+            <meshStandardMaterial color="#1B2A4A" roughness={0.2} metalness={0.3} />
+          </instancedMesh>
+          <instancedMesh ref={bind(`${group}Roof`)} args={[g.transit[group].Roof, undefined, MAX[group]]} frustumCulled={false}>
+            <meshStandardMaterial color="#F4F7FF" roughness={0.6} />
+          </instancedMesh>
+          <instancedMesh ref={bind(`${group}Wheels`)} args={[g.transit[group].Wheels, undefined, MAX[group]]} frustumCulled={false}>
+            <meshStandardMaterial color="#20232A" roughness={0.8} />
+          </instancedMesh>
+          <instancedMesh ref={bind(`${group}Tails`)} args={[g.transit[group].Tails, undefined, MAX[group]]} frustumCulled={false} instanceColor={c[`${group}Tails`]}>
+            <meshBasicMaterial toneMapped={false} />
+          </instancedMesh>
+          {g.transit[group].Poles && (
+            <instancedMesh ref={bind(`${group}Poles`)} args={[g.transit[group].Poles, undefined, MAX[group]]} frustumCulled={false}>
+              <meshStandardMaterial color={palette.wire} roughness={0.7} />
+            </instancedMesh>
+          )}
+        </group>
+      ))}
     </group>
   );
 }

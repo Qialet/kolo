@@ -53,7 +53,7 @@ function BusOverlay({ id }: { id: string }) {
   return (
     <group>
       <VehicleRing id={id} color={palette.bus} size={8} />
-      {data && data.route.length > 1 && <LiveRoute vehicleId={id} points={data.route} color={palette.bus} dashed />}
+      {data && data.route.length > 1 && <LiveRoute vehicleId={id} points={data.route} color={data.color} dashed />}
     </group>
   );
 }

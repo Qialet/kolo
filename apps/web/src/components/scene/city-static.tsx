@@ -14,6 +14,7 @@ import {
   buildMarkingsGeometry,
   buildPlaygroundGeometry,
   buildRoadGeometry,
+  buildWireGeometry,
   flatPolygon,
   LEVEL,
   withWindows,
@@ -31,6 +32,7 @@ export function CityStatic({ city }: { city: City }) {
       <Playgrounds city={city} />
       <Depots city={city} />
       <BusStops city={city} />
+      <TrolleyWires city={city} />
     </group>
   );
 }
@@ -192,6 +194,15 @@ function Depots({ city }: { city: City }) {
         </group>
       ))}
     </group>
+  );
+}
+
+function TrolleyWires({ city }: { city: City }) {
+  const geometry = useMemo(() => buildWireGeometry(city), [city]);
+  return (
+    <lineSegments geometry={geometry}>
+      <lineBasicMaterial color={palette.wire} transparent opacity={0.75} />
+    </lineSegments>
   );
 }
 

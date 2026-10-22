@@ -74,7 +74,7 @@
 **Файлы:** scene/vehicles.tsx, city-static.tsx, city-geometry.ts, overlays.tsx, lib/palette.ts, DESIGN.md.
 - Группы bus (до 260), trolley (до 60, две штанги на крыше), minibus (до 24, корпус 7,5 м); контактная сеть — две тонкие линии на высоте 5,6 м над сегментами с trolley; павильон остановки по heading у бордюра.
 - Атрибуция GTFS рядом с OSM.
-- [ ] Скриншоты Славии, Теразије и Студентского трга в будний день; коммит feat(web): transit vehicles, trolley wires and stops.
+- [x] Скриншоты Славии, Теразије и Студентского трга в будний день; коммит feat(web): transit vehicles, trolley wires and stops.
 
 ### Задача 8: часы, синхронизация и инспекторы
 **Файлы:** console/top-bar.tsx, inspector.tsx, inspector-places.tsx, command-search.tsx, lib/queries.ts, ui-store.ts (Selection line), scene/overlays.tsx; docs SIMULATION, ARCHITECTURE, DOMAIN, DESIGN, ROADMAP.

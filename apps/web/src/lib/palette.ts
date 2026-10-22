@@ -38,6 +38,10 @@ export const palette = {
   taxiSign: '#1B1D22',
   bus: '#2F6BFF',
   busDeep: '#1F4FD1',
+  trolley: '#169DBF',
+  minibus: '#6E98FF',
+  /** Trolleybus overhead wires and poles. */
+  wire: '#3B4250',
   depot: '#7C5CFF',
   depotLot: '#D9D8EC',
   service: '#FF6B3D',

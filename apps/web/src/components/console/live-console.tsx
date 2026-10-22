@@ -100,15 +100,16 @@ function ConsoleBody() {
           <OpsPanel />
         </div>
       </div>
-      {/* Map data licence (ODbL) requires visible attribution. */}
-      <a
-        href="https://www.openstreetmap.org/copyright"
-        target="_blank"
-        rel="noreferrer"
-        className="absolute bottom-0.5 left-1/2 -translate-x-1/2 rounded bg-white/60 px-1.5 text-[10px] text-muted-foreground"
-      >
-        © OpenStreetMap contributors
-      </a>
+      {/* Map data (ODbL) and the timetable (Serbian Open Data Licence) both require visible attribution. */}
+      <div className="absolute bottom-0.5 left-1/2 flex -translate-x-1/2 gap-1.5 rounded bg-white/60 px-1.5 text-[10px] whitespace-nowrap text-muted-foreground">
+        <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">
+          © OpenStreetMap contributors
+        </a>
+        <span>·</span>
+        <a href="https://data.gov.rs" target="_blank" rel="noreferrer">
+          Расписание: data.gov.rs, Grad Beograd
+        </a>
+      </div>
       <CreateOrderDialog />
       <CommandSearch open={searchOpen} onOpenChange={setSearchOpen} />
     </main>
