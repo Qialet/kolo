@@ -45,8 +45,8 @@
 **Файлы:** создать city/transit-places.ts (+ transit-places.test.ts); изменить city/types.ts, district-build.ts, places.ts, packages/contracts enums.ts; traffic.ts и routing.ts (isTransitKind вместо kind === 'BUS').
 **Интерфейсы:** BusStop {id, code, name, x, z, heading, lane, s, lines: id линий} — x, z у бордюра; BusLine {id, name, longName, mode, color, textColor}; Segment.trolley из ребра; VEHICLE_KINDS дополняется TROLLEY и MINIBUS в конце (индексы старых не меняются); isTransitKind(kind); makeVehicle: троллейбус 12 м, минибус 7,5 м.
 - bindStop: кандидаты — бордюрная полоса любого сегмента уровня улицы (psv-only можно, тоннели нет) в 30 м от точки; направление полосы отличается от dir не больше чем на 60°; ближайшая; s зажат в [10, length − 4]; без кандидата остановки в busStops нет.
-- [ ] Тесты на файле района: привязано от 90% остановок с вариантами; у всех |угол| ≤ 60° и расстояние ≤ 30 м; у остановок одного имени на двух сторонах улицы разные полосы; в ядре hotspots и pickOrigin работают с непустыми busStops.
-- [ ] Коммит feat(sim): bind GTFS stops to curb lanes.
+- [x] Тесты на файле района: привязано от 90% остановок с вариантами; у всех |угол| ≤ 60° и расстояние ≤ 30 м; у остановок одного имени на двух сторонах улицы разные полосы; в ядре hotspots и pickOrigin работают с непустыми busStops.
+- [x] Коммит feat(sim): bind GTFS stops to curb lanes.
 
 ### Задача 4: трассы вариантов по графу
 **Файлы:** создать engine/transit-net.ts (+ transit-net.test.ts).

@@ -73,8 +73,12 @@ export const DisputeStatus = {
 } as const;
 export type DisputeStatus = (typeof DisputeStatus)[keyof typeof DisputeStatus];
 
-export const VEHICLE_KINDS = ['TAXI', 'CAR', 'BUS'] as const;
+/** Wire index = position: new kinds go at the end. */
+export const VEHICLE_KINDS = ['TAXI', 'CAR', 'BUS', 'TROLLEY', 'MINIBUS'] as const;
 export type VehicleKind = (typeof VEHICLE_KINDS)[number];
+
+/** Public transport: runs on the timetable and may use bus-only roads. */
+export const isTransitKind = (kind: VehicleKind) => kind === 'BUS' || kind === 'TROLLEY' || kind === 'MINIBUS';
 
 /** Signal aspect of one approach. Serbian sequence: RED → RED_AMBER → GREEN → AMBER → RED. */
 export const LIGHT_ASPECTS = ['RED', 'RED_AMBER', 'GREEN', 'AMBER', 'FLASHING'] as const;

@@ -21,6 +21,7 @@ import { largestStronglyConnected } from '../graph.js';
 import type { District, RoadClass, RoadEdge } from './district.js';
 import { layoutDepots } from './depots.js';
 import { addPlaces, parkCars } from './places.js';
+import { addTransit } from './transit-places.js';
 import type { City, CityNode, Connector, Lane, RoadStrip, Segment, Street, Turn } from './types.js';
 
 /** Junction nodes joined by roads shorter than this become one junction (dual carriageways). */
@@ -138,6 +139,7 @@ export function buildCityFromDistrict(district: District): City {
     depots: [],
     busStops: [],
     busLines: [],
+    transit: district.transit,
     pois: [],
     segmentByKey: new Map(),
     addressById: new Map(),
@@ -230,6 +232,7 @@ export function buildCityFromDistrict(district: District): City {
         layer: e.src.layer,
       };
       if (e.src.psvOnly) seg.psvOnly = true;
+      if (e.src.trolley) seg.trolley = true;
       city.segments.push(seg);
       city.segmentByKey.set(`${from.id}>${to.id}`, seg.id);
       from.out.push(seg.id);
@@ -395,6 +398,7 @@ export function buildCityFromDistrict(district: District): City {
   for (const id of largestCarScc(city)) city.segments[id]!.core = true;
   for (const e of edges.values()) city.roads.push(roadStrip(e));
   addPlaces(city, district);
+  addTransit(city, district.transit);
   layoutDepots(city, district.depotSites);
   parkCars(city);
   return city;

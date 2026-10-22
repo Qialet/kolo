@@ -1,4 +1,4 @@
-import type { LightMode, VehicleKind } from '@kolo/contracts';
+import { isTransitKind, type LightMode, type VehicleKind } from '@kolo/contracts';
 import { lanePoint } from '../city/lanes.js';
 import type { City, Connector, CurbRef, Lane, Segment } from '../city/types.js';
 import { dist, dot, polyline, poseAlong, poseAt, type Polyline, type Pose, type Vec2 } from '../geometry.js';
@@ -66,7 +66,7 @@ const YARD_SPEED = 3.2;
 const IMPATIENCE = 20;
 
 export function makeDriver(rng: Rng, kind: VehicleKind): DriverProfile {
-  if (kind === 'BUS') return { v0Factor: rng.range(0.82, 0.9), aMax: 1.1, bComf: 2.2, headway: 1.5, minGap: 2.5 };
+  if (isTransitKind(kind)) return { v0Factor: rng.range(0.82, 0.9), aMax: 1.1, bComf: 2.2, headway: 1.5, minGap: 2.5 };
   return {
     v0Factor: rng.range(0.88, 1.08),
     aMax: rng.range(1.6, 2.4),
@@ -80,7 +80,7 @@ export function makeVehicle(id: string, kind: VehicleKind, rng: Rng): Vehicle {
   return {
     id,
     kind,
-    length: kind === 'BUS' ? 12 : kind === 'TAXI' ? 4.6 : rng.range(4.1, 4.9),
+    length: kind === 'BUS' || kind === 'TROLLEY' ? 12 : kind === 'MINIBUS' ? 7.5 : kind === 'TAXI' ? 4.6 : rng.range(4.1, 4.9),
     drv: makeDriver(rng, kind),
     mode: 'parked',
     lane: -1,
@@ -94,7 +94,7 @@ export function makeVehicle(id: string, kind: VehicleKind, rng: Rng): Vehicle {
     committed: -1,
     lateral: 0,
     lateralTarget: 0,
-    pullOffset: kind === 'BUS' ? 3.1 : 2.5,
+    pullOffset: isTransitKind(kind) ? 3.1 : 2.5,
     yard: null,
     yardEnd: 'parked',
     yardEndS: 0,
@@ -148,7 +148,7 @@ export class TrafficSystem {
     if (lane.seg === targetSeg && (targetLane === startLane || targetLane < 0) && ('seg' in target || target.s > startS + 6)) {
       segs = [lane.seg];
     } else {
-      segs = routeSegments(city, lane.seg, lane.index, targetSeg, extraCost ? (seg) => extraCost(seg.id) : undefined, v.kind === 'BUS', targetLane);
+      segs = routeSegments(city, lane.seg, lane.index, targetSeg, extraCost ? (seg) => extraCost(seg.id) : undefined, isTransitKind(v.kind), targetLane);
     }
     if (!segs) return false;
     const idx = laneIndexesFor(city, segs, v.straightPreference, targetLane >= 0 ? 'curb' : 'any');
@@ -189,7 +189,7 @@ export class TrafficSystem {
     const last = v.path[v.path.length - 1];
     if (!last) return false;
     const lane = city.lanes[last.lane]!;
-    const segs = routeSegments(city, lane.seg, lane.index, targetSeg, undefined, v.kind === 'BUS');
+    const segs = routeSegments(city, lane.seg, lane.index, targetSeg, undefined, isTransitKind(v.kind));
     if (!segs) return false;
     const rest = chooseLanes(city, segs, last.lane, -1, laneIndexesFor(city, segs, v.straightPreference, 'any'));
     if (!rest) return false;

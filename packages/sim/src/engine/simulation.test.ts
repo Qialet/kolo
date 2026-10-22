@@ -25,7 +25,7 @@ describe('Simulation', () => {
   it('runs fifteen minutes of city life without collisions, NaNs or gridlock', () => {
     const city = buildCity();
     const events: string[] = [];
-    expect(city.busStops).toHaveLength(0);
+    expect(city.busStops.length).toBeGreaterThan(100);
     const sim = new Simulation(city, fleet(60), { hooks: { onOrderEvent: (_o, e) => events.push(e.type) } });
     let overlaps = 0;
     let checks = 0;
@@ -110,5 +110,20 @@ describe('Simulation', () => {
       back = sim.taxiDetail('T1')!.activity === 'FREE';
     }
     expect(back).toBe(true);
+  });
+
+  it('takes orders from bus stops in the core network', () => {
+    const city = buildCity();
+    const pickups: string[] = [];
+    const sim = new Simulation(city, fleet(20), { trafficDensity: 0.1, demand: 40, hooks: { onOrderCreated: (o, src) => src === 'BUS_STOP' && pickups.push(o.pickup.addressId) } });
+    for (let i = 0; i < 20 * 120; i++) sim.step(0.05);
+    expect(pickups.length).toBeGreaterThan(5);
+    const stopIds = new Set(city.busStops.map((s) => s.id));
+    for (const id of pickups) {
+      expect(stopIds.has(id)).toBe(true);
+      const place = sim.place(id)!;
+      const seg = city.segments[city.lanes[place.lane]!.seg]!;
+      expect(seg.core && !seg.psvOnly && seg.layer === 0).toBe(true);
+    }
   });
 });

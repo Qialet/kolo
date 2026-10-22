@@ -26,7 +26,7 @@ const CELL = 50;
 const key = (cx: number, cz: number) => `${cx},${cz}`;
 
 /** Coarse uniform grid over line pieces. */
-class SegmentGrid<T> {
+export class SegmentGrid<T> {
   private readonly cells = new Map<string, { a: Vec2; b: Vec2; item: T }[]>();
 
   add(a: Vec2, b: Vec2, item: T) {

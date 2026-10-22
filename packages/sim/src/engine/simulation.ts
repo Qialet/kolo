@@ -23,7 +23,7 @@ import {
   type TaxiDetail,
 } from '@kolo/contracts';
 import { lanePoint } from '../city/lanes.js';
-import type { BusLine, City, CurbRef, Depot, Slot } from '../city/types.js';
+import type { City, CurbRef, Depot, Slot } from '../city/types.js';
 import { dist, type Vec2 } from '../geometry.js';
 import { createRng, type Rng } from '../rng.js';
 import { CANCEL_REASONS_PASSENGER, DISPUTE_REASONS, passengerName } from './names.js';
@@ -101,16 +101,6 @@ interface Taxi {
   legOdo: number;
 }
 
-interface Bus {
-  v: Vehicle;
-  line: BusLine;
-  /** Index into line.segments of the last segment appended to the path. */
-  cursor: number;
-  dwellUntil: number;
-  lastStop: string | null;
-  passengers: number;
-}
-
 interface SimOrder {
   id: string;
   code: string;
@@ -145,17 +135,20 @@ const HOTSPOT_WEIGHT = 2;
 const BASE_ORDERS_PER_MIN = 3.2;
 const FARE = { start: 230, perKm: 95, perMin: 18 };
 const SUBSTEP = 0.05;
+/** Shortest curb lane a stop pick-up point fits on (8 m clear at both ends, 20 m short of the shelter). */
+const STOP_PLACE_LANE = 32;
 
 export class Simulation {
   readonly traffic: TrafficSystem;
   readonly taxis = new Map<string, Taxi>();
-  readonly buses = new Map<string, Bus>();
   readonly roaming: Roaming;
   readonly orders = new Map<string, SimOrder>();
   private readonly rng: Rng;
   private readonly hooks: SimHooks;
   private readonly places = new Map<string, Place>();
   private readonly hotspots: Place[] = [];
+  /** Bus stops that double as pick-up points. */
+  private readonly stopPlaces: Place[] = [];
   private readonly slotUse = new Map<string, (string | null)[]>();
   private readonly boxUse = new Map<string, (string | null)[]>();
   private orderSeq = 10000;
@@ -181,17 +174,22 @@ export class Simulation {
     this.traffic = new TrafficSystem(city);
     for (const a of city.addresses) this.places.set(a.id, { id: a.id, label: a.label, lane: a.lane, s: a.s, x: a.x, z: a.z });
     for (const st of city.busStops) {
-      this.places.set(st.id, { id: st.id, label: `Остановка «${st.name}»`, lane: st.lane, s: Math.max(8, st.s - 20), x: st.x, z: st.z });
+      // Taxis wait short of the shelter, and only where they may drive and stop.
+      const lane = city.lanes[st.lane]!;
+      const seg = city.segments[lane.seg]!;
+      if (!seg.core || seg.psvOnly || lane.length < STOP_PLACE_LANE) continue;
+      const place = { id: st.id, label: `Остановка «${st.name}»`, lane: st.lane, s: Math.max(8, st.s - 20), x: st.x, z: st.z };
+      this.places.set(st.id, place);
+      this.stopPlaces.push(place);
     }
     for (const poi of city.pois) if (poi.weight >= HOTSPOT_WEIGHT) this.hotspots.push(this.places.get(poi.addressId)!);
-    for (const st of city.busStops) this.hotspots.push(this.places.get(st.id)!);
+    this.hotspots.push(...this.stopPlaces);
     for (const d of city.depots) {
       this.slotUse.set(d.id, d.slots.map(() => null));
       this.boxUse.set(d.id, d.boxes.map(() => null));
     }
     this.roaming = new Roaming(this.traffic, this.rng);
     this.spawnFleet(fleet);
-    this.spawnBuses();
     this.roaming.update(this.carTarget, true);
   }
 
@@ -247,31 +245,6 @@ export class Simulation {
     }
   }
 
-  private spawnBuses() {
-    for (const line of this.city.busLines) {
-      for (let k = 0; k < 2; k++) {
-        const stopId = line.stops[Math.floor((k * line.stops.length) / 2)]!;
-        const stop = this.city.busStops.find((s) => s.id === stopId)!;
-        const v = makeVehicle(`BUS-${line.id}-${k + 1}`, 'BUS', this.rng);
-        this.traffic.add(v);
-        this.traffic.placeOnLane(v, stop.lane, stop.s, true);
-        const seg = this.city.lanes[stop.lane]!.seg;
-        const bus: Bus = { v, line, cursor: line.segments.indexOf(seg), dwellUntil: this.rng.range(3, 14), lastStop: stop.id, passengers: this.rng.int(8, 30) };
-        this.extendBus(bus, 6);
-        this.buses.set(v.id, bus);
-      }
-    }
-  }
-
-  private extendBus(bus: Bus, count: number) {
-    const segs: number[] = [];
-    for (let i = 0; i < count; i++) {
-      bus.cursor = (bus.cursor + 1) % bus.line.segments.length;
-      segs.push(bus.line.segments[bus.cursor]!);
-    }
-    this.traffic.appendSegments(bus.v, segs, true);
-  }
-
   /** Background cars wanted at the current density. */
   get carTarget() {
     return Math.round(MAX_CARS * this.trafficDensity);
@@ -313,7 +286,6 @@ export class Simulation {
     this.traffic.step(dt);
     const t = this.traffic.t;
     for (const taxi of this.taxis.values()) this.updateTaxi(taxi, t);
-    for (const bus of this.buses.values()) this.updateBus(bus, t);
     this.roaming.step(this.carTarget);
     this.dispatchClock += dt;
     if (this.dispatchClock >= 1) {
@@ -554,26 +526,6 @@ export class Simulation {
     this.setFleetStatus(taxi.info.id, 'MAINTENANCE', 'SYSTEM');
   }
 
-  // ───────────────────────────── buses ─────────────────────────────
-
-  private updateBus(bus: Bus, t: number) {
-    const v = bus.v;
-    if (v.path.length - v.pathIdx < 4) this.extendBus(bus, 4);
-    if (v.arrived) {
-      v.arrived = false;
-      bus.dwellUntil = t + this.rng.range(9, 18);
-      bus.passengers = Math.max(3, Math.min(70, bus.passengers + this.rng.int(-10, 12)));
-    }
-    if (v.mode === 'pulled' && !v.wantsDepart && t >= bus.dwellUntil) v.wantsDepart = true;
-    if (v.mode === 'lane' && !v.stop) {
-      const stop = this.city.busStops.find((s) => s.lane === v.lane && s.lines.includes(bus.line.id) && s.s > v.s + 6);
-      if (stop && stop.id !== bus.lastStop) {
-        v.stop = { lane: stop.lane, s: stop.s };
-        bus.lastStop = stop.id;
-      }
-    }
-  }
-
   // ───────────────────────────── orders ─────────────────────────────
 
   place(id: string): Place | undefined {
@@ -582,7 +534,7 @@ export class Simulation {
 
   private pickOrigin(): Place {
     const r = this.rng.next();
-    if (r < 0.4 && this.city.busStops.length) return this.places.get(this.rng.pick(this.city.busStops).id)!;
+    if (r < 0.4 && this.stopPlaces.length) return this.rng.pick(this.stopPlaces);
     if (r < 0.7) {
       const total = this.city.pois.reduce((a, p) => a + p.weight, 0);
       let x = this.rng.range(0, total);
@@ -598,7 +550,7 @@ export class Simulation {
     const pickup = this.pickOrigin();
     let dropoff = this.places.get(this.rng.pick(this.city.addresses).id)!;
     for (let i = 0; i < 10 && dist(pickup, dropoff) < 300; i++) dropoff = this.places.get(this.rng.pick(this.city.addresses).id)!;
-    const source: OrderSource = pickup.id.startsWith('S') ? 'BUS_STOP' : this.rng.chance(0.85) ? 'APP' : 'PHONE';
+    const source: OrderSource = this.stopPlaces.includes(pickup) ? 'BUS_STOP' : this.rng.chance(0.85) ? 'APP' : 'PHONE';
     this.createOrder({ pickupId: pickup.id, dropoffId: dropoff.id, source });
   }
 
@@ -1017,37 +969,10 @@ export class Simulation {
     };
   }
 
+  /** Timetable buses come with the transit runner; until then there is nothing to inspect. */
   busDetail(id: string): BusDetail | null {
-    const bus = this.buses.get(id);
-    if (!bus) return null;
-    const v = bus.v;
-    const route = this.traffic.routeOf(v);
-    // Next stop ahead on the path.
-    let nextStop = '';
-    let meters = 0;
-    let acc = v.mode === 'lane' || v.mode === 'pulled' ? -v.s : 0;
-    for (let i = v.pathIdx; i < v.path.length && !nextStop; i++) {
-      const step = v.path[i]!;
-      const lane = this.city.lanes[step.lane]!;
-      const stop = this.city.busStops.find(
-        (s) => s.lane === step.lane && s.lines.includes(bus.line.id) && (i > v.pathIdx || s.s > v.s + 1),
-      );
-      if (stop) {
-        nextStop = stop.name;
-        meters = acc + stop.s;
-      } else acc += lane.length + (v.path[i + 1] ? this.city.connectors[v.path[i + 1]!.conn]!.line.length : 0);
-    }
-    return {
-      id,
-      line: bus.line.id,
-      lineName: bus.line.name,
-      speedKmh: Math.round(v.speed * 36) / 10,
-      nextStop: nextStop || '—',
-      etaSec: Math.round(Math.max(0, meters) / 7),
-      dwellLeftSec: v.mode === 'pulled' ? Math.max(0, Math.round(bus.dwellUntil - this.traffic.t)) : 0,
-      passengers: bus.passengers,
-      route: route.points.slice(0, 40).map((p) => ({ x: round(p.x), z: round(p.z) })),
-    };
+    void id;
+    return null;
   }
 }
 

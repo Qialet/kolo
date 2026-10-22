@@ -1,5 +1,5 @@
 import type { Polyline, Rect, Vec2 } from '../geometry.js';
-import type { AreaKind, BuildingUse, PoiKind } from './district.js';
+import type { AreaKind, BuildingUse, DistrictTransit, PoiKind, TransitMode } from './district.js';
 
 export type StreetClass = 'boulevard' | 'local';
 export type Turn = 'S' | 'L' | 'R';
@@ -60,6 +60,8 @@ export interface Segment {
   layer: number;
   /** Bus / trolleybus only: cars never route over it. */
   psvOnly?: boolean;
+  /** Has trolleybus wires overhead. */
+  trolley?: boolean;
   /**
    * In the main strongly connected network: every core segment reaches every other one without
    * leaving the map. Taxis, addresses and orders live here; frame entries and exits are not core.
@@ -198,21 +200,30 @@ export interface Depot {
   boxes: Slot[];
 }
 
+/** A GTFS stop bound to a curb lane; vehicles pull over at (lane, s). */
 export interface BusStop extends CurbRef {
+  /** GTFS stop_id. */
   id: string;
+  /** Number on the pole. */
+  code: string;
   name: string;
+  /** Shelter on the sidewalk just behind the kerb. */
   x: number;
   z: number;
   heading: number;
+  /** Ids of the lines calling here. */
   lines: string[];
 }
 
 export interface BusLine {
+  /** GTFS route_id. */
   id: string;
+  /** Number on the vehicle. */
   name: string;
-  /** Closed loop of segment ids. */
-  segments: number[];
-  stops: string[];
+  longName: string;
+  mode: TransitMode;
+  color: string;
+  textColor: string;
 }
 
 export interface Poi {
@@ -246,6 +257,8 @@ export interface City {
   depots: Depot[];
   busStops: BusStop[];
   busLines: BusLine[];
+  /** Raw timetable section of the district (stops, patterns, calendar). */
+  transit: DistrictTransit;
   pois: Poi[];
   /** Fast lookups. */
   segmentByKey: Map<string, number>;

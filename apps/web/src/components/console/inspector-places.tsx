@@ -156,13 +156,13 @@ export function StopInspector({ id }: { id: string }) {
         iconClass="bg-bus text-white"
         eyebrow="Остановка ГСП"
         title={stop.name}
-        subtitle={`Линии: ${stop.lines.join(', ')}`}
+        subtitle={`Линии: ${lines.map((l) => l.name).join(', ')}`}
         onFocus={() => focus(stop.x, stop.z, { zoom: 9 })}
       />
       <Section title="Маршруты">
         {lines.map((l) => (
-          <Row key={l.id} label={<StatusBadge tone="bus">{l.id}</StatusBadge>}>
-            {l.name}
+          <Row key={l.id} label={<StatusBadge tone="bus">{l.name}</StatusBadge>}>
+            {l.longName}
           </Row>
         ))}
       </Section>
