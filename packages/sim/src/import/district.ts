@@ -1,4 +1,5 @@
 import type { District } from '../city/district.js';
+import { emptyTransit, importGtfs } from './gtfs.js';
 import { DEPOT_SITES, importPlaces, type DepotSiteSpec } from './osm-places.js';
 import { boundsOfBBox, importRoads, type OsmElement } from './osm-roads.js';
 import { BELGRADE_ANCHOR, type BBoxDeg } from './project.js';
@@ -10,11 +11,14 @@ export interface DistrictOptions {
   osmTimestamp: string;
   /** Real lots for partner depots (defaults to the agreed Belgrade sites). */
   depotSites?: DepotSiteSpec[];
+  /** GTFS feed as file name → CSV text; without it the transit section is empty. */
+  gtfs?: Record<string, string>;
 }
 
-/** Assembles a district file from raw OSM elements; meta.version hashes everything else. */
+/** Assembles a district file from raw OSM elements and GTFS; meta.version hashes everything else. */
 export function buildDistrict(elements: OsmElement[], opts: DistrictOptions): District {
   const roads = importRoads(elements, opts.bbox);
+  const transit = opts.gtfs ? importGtfs(opts.gtfs, opts.bbox) : emptyTransit();
   const district: District = {
     meta: {
       id: opts.id,
@@ -23,11 +27,12 @@ export function buildDistrict(elements: OsmElement[], opts: DistrictOptions): Di
       bboxDeg: { ...opts.bbox },
       bounds: boundsOfBBox(opts.bbox),
       osmTimestamp: opts.osmTimestamp,
-      gtfsVersion: null,
+      gtfsVersion: transit.feed?.version ?? null,
       version: '',
     },
     roads,
     ...importPlaces(elements, opts.bbox, roads, opts.depotSites ?? DEPOT_SITES),
+    transit,
   };
   district.meta.version = fnv1a(JSON.stringify(district));
   return district;

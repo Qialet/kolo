@@ -103,7 +103,8 @@ export function simplifyRing(ring: Vec2[], tol: number): Vec2[] {
   return out.length >= 3 ? out : ring;
 }
 
-function simplifyChain(pts: Vec2[], tol: number): Vec2[] {
+/** Douglas–Peucker on an open polyline; the end points are always kept. */
+export function simplifyChain(pts: Vec2[], tol: number): Vec2[] {
   if (pts.length <= 2) return pts;
   const a = pts[0]!;
   const b = pts[pts.length - 1]!;

@@ -1,4 +1,5 @@
 import type { Rect } from '../geometry.js';
+import type { TransitCalendar } from '../transit/calendar.js';
 
 /**
  * A district file: real map data for one part of the city, produced offline by the importer
@@ -7,6 +8,72 @@ import type { Rect } from '../geometry.js';
 export interface District extends DistrictPlaces {
   meta: DistrictMeta;
   roads: DistrictRoads;
+  transit: DistrictTransit;
+}
+
+/** Public transport from GTFS, cut to the district frame (empty when there was no feed). */
+export interface DistrictTransit {
+  /** Feed version and validity, dates YYYYMMDD. */
+  feed: { version: string; start: string; end: string } | null;
+  calendar: TransitCalendar;
+  stops: DistrictStop[];
+  lines: DistrictLine[];
+  patterns: DistrictPattern[];
+}
+
+export interface DistrictStop {
+  /** GTFS stop_id. */
+  id: string;
+  /** Number on the pole (stop_code). */
+  code: string;
+  /** Latin script. */
+  name: string;
+  x: number;
+  z: number;
+  /** Mean unit direction of travel along the shapes at the stop, 0.01 precision. */
+  dir: [number, number];
+}
+
+export type TransitMode = 'bus' | 'trolley' | 'minibus';
+
+export interface DistrictLine {
+  /** GTFS route_id. */
+  id: string;
+  /** Short name on the vehicle (route_short_name). */
+  name: string;
+  longName: string;
+  mode: TransitMode;
+  /** #RRGGBB of the line and of its label text. */
+  color: string;
+  text: string;
+}
+
+/** Trips of one line that serve the same in-frame stops in the same order. */
+export interface DistrictPattern {
+  /** Index into lines. */
+  line: number;
+  /** GTFS direction_id. */
+  dir: number;
+  headsign: string;
+  /** Indices into stops, in travel order. */
+  stops: number[];
+  /** Flat x, z pairs of the trip shape inside the frame plus 50 m, simplified to 2 m. */
+  shape: number[];
+  /** Trips come from stops outside the frame (enter) or go on past it (exit). */
+  enter: boolean;
+  exit: boolean;
+  profiles: DistrictProfile[];
+}
+
+/** Trips of a pattern with identical relative times. */
+export interface DistrictProfile {
+  /** Flat arrival, departure pairs per stop, seconds from the departure at the first stop. */
+  t: number[];
+  /** Seconds from that departure when the trip crosses the frame inwards (negative) and outwards. */
+  enter?: number;
+  exit?: number;
+  /** Per service id: delta-coded ascending seconds of day of that departure (may exceed 86 400). */
+  starts: Record<string, number[]>;
 }
 
 /** Everything off the road graph: buildings, land cover, addresses, places of interest, depot sites. */

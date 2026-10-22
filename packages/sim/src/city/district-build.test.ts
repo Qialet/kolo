@@ -36,6 +36,7 @@ function district(nodes: [number, number, Partial<RoadNode>?][], edges: [number,
     addresses: [],
     pois: [],
     depotSites: [],
+    transit: { feed: null, calendar: { week: [], extra: [] }, stops: [], lines: [], patterns: [] },
   };
 }
 
