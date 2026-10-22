@@ -34,7 +34,7 @@ export interface DistrictStop {
   dir: [number, number];
 }
 
-export type TransitMode = 'bus' | 'trolley' | 'minibus';
+export type TransitMode = 'bus' | 'trolley' | 'minibus' | 'tram';
 
 export interface DistrictLine {
   /** GTFS route_id. */
@@ -186,7 +186,9 @@ export type RoadClass =
   | 'unclassified'
   | 'residential'
   | 'living_street'
-  | 'busway';
+  | 'busway'
+  /** A one-way tram track (railway=tram): its own lane, trams only. */
+  | 'tram';
 
 /** A road between two graph nodes, stored in its forward direction. */
 export interface RoadEdge {

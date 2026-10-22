@@ -29,11 +29,16 @@ mkdirSync(dirname(outPath), { recursive: true });
 const json = JSON.stringify(district);
 writeFileSync(outPath, json);
 const { roads, meta, buildings, areas, addresses, pois, depotSites, trees, transit } = district;
+const tracks = roads.edges.filter((e) => e.cls === 'tram');
+let trackM = 0;
+for (const e of tracks) for (let i = 2; i < e.pts.length; i += 2) trackM += Math.hypot(e.pts[i] - e.pts[i - 2], e.pts[i + 1] - e.pts[i - 1]);
+const twoWayTracks = osm.elements.filter((e) => e.type === 'way' && e.tags?.railway === 'tram' && !e.tags.service && e.tags.oneway !== 'yes').length;
 const rd = transit.patterns.flatMap((p) => p.profiles).reduce((n, p) => n + (p.starts.RD?.length ?? 0), 0);
 console.log(
   `${outPath}: ${(json.length / 1024).toFixed(0)} KB, version ${meta.version}, ` +
     `${roads.nodes.length} nodes, ${roads.edges.length} edges, ${roads.restrictions.length} restrictions; ` +
     `${buildings.length} buildings, ${areas.length} areas, ${trees.length / 2} trees, ${addresses.length} addresses, ${pois.length} POIs, ${depotSites.length} depot lots; ` +
-    `GTFS ${meta.gtfsVersion}: ${transit.stops.length} stops, ${transit.lines.length} lines, ${transit.patterns.length} patterns, ` +
+    `${tracks.length} tram track edges (${(trackM / 1000).toFixed(1)} km, ${twoWayTracks} two-way tracks skipped); ` +
+    `GTFS ${meta.gtfsVersion}: ${transit.stops.length} stops, ${transit.lines.length} lines (${transit.lines.filter((l) => l.mode === 'tram').length} tram), ${transit.patterns.length} patterns, ` +
     `${rd} RD departures, transit ${(JSON.stringify(transit).length / 1024).toFixed(0)} KB`,
 );

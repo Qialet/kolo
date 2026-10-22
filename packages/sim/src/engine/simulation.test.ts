@@ -81,6 +81,9 @@ describe('Simulation', () => {
 
     const progress: number[] = [];
     for (let i = 0; i < 20 * 900 && !completedMeters; i++) {
+      // This passenger never changes their mind: a random cancellation is not what the test is about.
+      const live = sim.orders.get(order.id);
+      if (live) live.cancelAt = 0;
       sim.step(0.05);
       if (i % 20 !== 0) continue;
       const taxi = sim.orders.get(order.id)?.vehicleId;

@@ -60,9 +60,18 @@ export function addTransit(city: City, transit: DistrictTransit) {
   city.transit = transit;
   for (const l of transit.lines) city.busLines.push({ id: l.id, name: l.name, longName: l.longName, mode: l.mode, color: l.color, textColor: l.text });
   const linesAt = transit.stops.map(() => new Set<string>());
-  for (const p of transit.patterns) for (const i of p.stops) linesAt[i]!.add(transit.lines[p.line]!.id);
+  // Tram stops are bound to the tracks in plan 4, task 4; until then trams have no stops of their own.
+  const byRoad = new Set<number>();
+  for (const p of transit.patterns) {
+    if (transit.lines[p.line]!.mode === 'tram') continue;
+    for (const i of p.stops) {
+      linesAt[i]!.add(transit.lines[p.line]!.id);
+      byRoad.add(i);
+    }
+  }
   const grid = curbLanes(city);
   transit.stops.forEach((raw, i) => {
+    if (!byRoad.has(i)) return;
     const hit = bindStop(grid, raw);
     if (!hit) return;
     const street = city.streets[city.segments[hit.lane.seg]!.street]!;

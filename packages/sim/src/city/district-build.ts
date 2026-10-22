@@ -50,6 +50,8 @@ const RANK: Record<RoadClass, number> = {
   unclassified: 2,
   residential: 2,
   living_street: 1,
+  // Trams go first at unsignalised crossings, even before a roundabout's own traffic.
+  tram: 20,
 };
 const RING_BONUS = 10;
 export const laneWidthOf = (cls: RoadClass) => (cls === 'residential' || cls === 'living_street' ? 3.0 : 3.2);
@@ -78,6 +80,7 @@ export function buildCityFromDistrict(district: District): City {
 
   const edges = new Map<number, WorkEdge>();
   for (const e of roads.edges) {
+    if (e.cls === 'tram') continue;
     const pts: Vec2[] = [];
     for (let i = 0; i < e.pts.length; i += 2) pts.push({ x: e.pts[i]!, z: e.pts[i + 1]! });
     edges.set(e.id, { id: e.id, a: e.a, b: e.b, pts, src: e, lanesFwd: e.lanesFwd, lanesBwd: e.lanesBwd, turnFwd: e.turnFwd, turnBwd: e.turnBwd, merged: [e.id] });

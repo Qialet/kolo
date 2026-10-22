@@ -7,7 +7,7 @@ import { chooseLanes, laneIndexesFor } from './routing.js';
 import { makeVehicle, type PathStep, type TrafficSystem, type Vehicle } from './traffic.js';
 import type { NetPattern, TransitNet } from './transit-net.js';
 
-const KIND: Record<TransitMode, VehicleKind> = { bus: 'BUS', trolley: 'TROLLEY', minibus: 'MINIBUS' };
+const KIND: Record<TransitMode, VehicleKind> = { bus: 'BUS', trolley: 'TROLLEY', minibus: 'MINIBUS', tram: 'TRAM' };
 /** A trip starting at a terminus inside the frame shows up this long before its departure. */
 const TERMINUS_LEAD = 60;
 /** A trip that cannot get on the road (entry or terminus occupied) waits this long, then is missed. */

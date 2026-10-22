@@ -72,7 +72,7 @@ interface PatternAcc {
 }
 
 /**
- * Cuts a GTFS feed (file name → CSV text) to the frame: bus and trolleybus lines, the in-frame stops
+ * Cuts a GTFS feed (file name → CSV text) to the frame: bus, trolleybus and tram lines, the in-frame stops
  * they serve, patterns with clipped shapes, and timetables grouped into profiles of equal relative times.
  */
 export function importGtfs(files: Record<string, string>, bbox: BBoxDeg): DistrictTransit {
@@ -82,7 +82,7 @@ export function importGtfs(files: Record<string, string>, bbox: BBoxDeg): Distri
   eachRecord(files['routes.txt'], (get) => {
     const type = get('route_type');
     const name = toLatin(get('route_short_name'));
-    const mode: TransitMode | null = type === '11' ? 'trolley' : type === '3' ? (MINIBUS_LINES.includes(name) ? 'minibus' : 'bus') : null;
+    const mode: TransitMode | null = type === '0' ? 'tram' : type === '11' ? 'trolley' : type === '3' ? (MINIBUS_LINES.includes(name) ? 'minibus' : 'bus') : null;
     if (!mode) return;
     routes.set(get('route_id'), {
       name,

@@ -93,6 +93,7 @@ export function buildTransitNet(city: City, transit: DistrictTransit): TransitNe
   const net: TransitNet = { patterns: [], byLine: new Map() };
 
   transit.patterns.forEach((raw, index) => {
+    if (transit.lines[raw.line]!.mode === 'tram') return;
     const shape: Vec2[] = [];
     for (let i = 0; i < raw.shape.length; i += 2) shape.push({ x: raw.shape[i]!, z: raw.shape[i + 1]! });
     const near = nearShape(mids, shape);

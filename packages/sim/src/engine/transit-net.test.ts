@@ -29,8 +29,8 @@ describe('GTFS patterns over the road graph', () => {
 
   it('routes nearly every pattern through all of its bound stops', () => {
     const candidates = district.transit.patterns
-      .map((p, index) => ({ index, bound: p.stops.filter((i) => stopIndex.has(district.transit.stops[i]!.id)).length }))
-      .filter((c) => c.bound >= 2);
+      .map((p, index) => ({ index, tram: district.transit.lines[p.line]!.mode === 'tram', bound: p.stops.filter((i) => stopIndex.has(district.transit.stops[i]!.id)).length }))
+      .filter((c) => !c.tram && c.bound >= 2);
     const full = candidates.filter((c) => net.patterns.find((p) => p.index === c.index)?.stops.length === c.bound);
     // Stops on ramps and turning loops the road graph cannot drive through are skipped.
     expect(full.length / candidates.length).toBeGreaterThanOrEqual(0.9);

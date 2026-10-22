@@ -28,6 +28,7 @@ const DEFAULT_KMH: Record<RoadClass, number> = {
   residential: 40,
   living_street: 10,
   busway: 50,
+  tram: 40,
 };
 const ZONE_KMH: Record<string, number> = { 'RS:urban': 50, 'RS:living_street': 10, 'RS:rural': 80, 'RS:motorway': 130 };
 const YES = new Set(['yes', 'true', '1']);
@@ -45,8 +46,27 @@ interface WayInfo {
   edge: Omit<RoadEdge, 'id' | 'a' | 'b' | 'pts'>;
 }
 
+/** A one-way tram track in service (yards and sidings are left out; two-way single track is not modelled). */
+function trackInfo(id: number, nodes: number[], t: Tags): WayInfo | null {
+  if (t.railway !== 'tram' || t.service || !YES.has(t.oneway ?? '')) return null;
+  const edge: WayInfo['edge'] = {
+    name: '',
+    cls: 'tram',
+    lanesFwd: 1,
+    lanesBwd: 0,
+    speed: Math.round(((speedKmh(t.maxspeed) ?? DEFAULT_KMH.tram) / 3.6) * 100) / 100,
+    layer: int(t.layer) ?? 0,
+    psvOnly: true,
+    osm: id,
+  };
+  if (t.tunnel === 'yes') edge.tunnel = true;
+  if (t.bridge && t.bridge !== 'no') edge.bridge = true;
+  return { id, nodes, edge };
+}
+
 /** Road attributes of a drivable OSM way, or null when cars and buses cannot use it. */
 function wayInfo(id: number, nodes: number[], t: Tags): WayInfo | null {
+  if (t.railway === 'tram') return trackInfo(id, nodes, t);
   if (!t.highway || t.area === 'yes') return null;
   const link = LINKS.has(t.highway);
   const cls = (link ? t.highway.replace('_link', '') : t.highway) as RoadClass;
@@ -245,10 +265,10 @@ export function importRoads(elements: OsmElement[], bbox: BBoxDeg): DistrictRoad
     edges.push({ id: edges.length, a: a.id, b: b.id, pts: r.pts.flatMap((p) => [round1(p.x), round1(p.z)]), ...r.info.edge });
   }
 
-  // Keep the largest strongly connected part for cars; the outside world is one extra node.
+  // Keep the largest strongly connected part for cars (the outside world is one extra node) and every tram track.
   const nodes = [...nodeByKey.values()];
   const keep = largestScc(nodes, edges);
-  edges = edges.filter((e) => keep.has(e.a) && keep.has(e.b));
+  edges = edges.filter((e) => e.cls === 'tram' || (keep.has(e.a) && keep.has(e.b)));
   const used = new Set(edges.flatMap((e) => [e.a, e.b]));
   const kept = nodes.filter((n) => used.has(n.id));
   const newId = new Map(kept.map((n, i) => [n.id, i]));

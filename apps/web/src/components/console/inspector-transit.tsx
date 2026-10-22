@@ -14,8 +14,8 @@ import { cn } from '@/lib/utils';
 import { fmtDuration, StatusBadge } from './common';
 import { InspectorHeader, InspectorSkeleton, Section } from './inspector';
 
-const KIND_LABEL: Record<VehicleKind, string> = { TAXI: 'Такси', CAR: 'Машина', BUS: 'Автобус', TROLLEY: 'Троллейбус', MINIBUS: 'Минибус' };
-const MODE_LABEL: Record<TransitMode, string> = { bus: 'Автобусная линия', trolley: 'Троллейбусная линия', minibus: 'Линия минибусов' };
+const KIND_LABEL: Record<VehicleKind, string> = { TAXI: 'Такси', CAR: 'Машина', BUS: 'Автобус', TROLLEY: 'Троллейбус', MINIBUS: 'Минибус', TRAM: 'Трамвай' };
+const MODE_LABEL: Record<TransitMode, string> = { bus: 'Автобусная линия', trolley: 'Троллейбусная линия', minibus: 'Линия минибусов', tram: 'Трамвайная линия' };
 
 /** Line number on its GTFS colours. */
 export function LineBadge({ line, className, onClick }: { line: { name: string; color: string; textColor: string }; className?: string; onClick?: () => void }) {

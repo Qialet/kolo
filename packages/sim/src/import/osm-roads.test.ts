@@ -140,6 +140,36 @@ describe('importRoads', () => {
     expect(roads.edges.find((e) => e.bridge)!.layer).toBe(1);
   });
 
+  it('imports one-way tram tracks and splits the street they cross at the shared node', () => {
+    const o = osm();
+    const c = o.node(0, 0);
+    o.way([o.node(-400, 0), c, o.node(400, 0)], { highway: 'secondary' });
+    o.way([o.node(0, -400), c, o.node(0, 400)], { railway: 'tram', oneway: 'yes' });
+    const roads = importRoads(o.els, box);
+    const centre = roads.nodes.find((n) => Math.hypot(n.x, n.z) < 0.5)!;
+    const streets = roads.edges.filter((e) => e.cls === 'secondary');
+    const tracks = roads.edges.filter((e) => e.cls === 'tram');
+    expect(streets).toHaveLength(2);
+    expect(tracks).toHaveLength(2);
+    for (const e of [...streets, ...tracks]) expect([e.a, e.b]).toContain(centre.id);
+    for (const t of tracks) {
+      expect([t.lanesFwd, t.lanesBwd, t.psvOnly, t.name]).toEqual([1, 0, true, '']);
+      expect(t.speed).toBeCloseTo(11.11, 2);
+    }
+  });
+
+  it('skips yard and siding tracks and two-way tracks', () => {
+    const o = osm();
+    o.way([o.node(-400, 0), o.node(400, 0)], { highway: 'secondary' });
+    o.way([o.node(-400, 20), o.node(400, 20)], { railway: 'tram', oneway: 'yes', service: 'yard' });
+    o.way([o.node(-400, 40), o.node(400, 40)], { railway: 'tram', oneway: 'yes', service: 'siding' });
+    o.way([o.node(-400, 60), o.node(400, 60)], { railway: 'tram' });
+    o.way([o.node(-400, 80), o.node(400, 80)], { railway: 'tram', oneway: 'yes', maxspeed: '30' });
+    const tracks = importRoads(o.els, box).edges.filter((e) => e.cls === 'tram');
+    expect(tracks).toHaveLength(1);
+    expect(tracks[0]!.speed).toBeCloseTo(8.33, 2);
+  });
+
   it('keeps node tags when Overpass repeats a node as an untagged skeleton', () => {
     const o = osm();
     const c = o.node(0, 0, { highway: 'traffic_signals' });
@@ -195,6 +225,11 @@ describe.runIf(existsSync(RAW))('importRoads on the real Belgrade extract', () =
     expect(roads.edges.length).toBeGreaterThan(500);
     expect(roads.edges.filter((e) => e.roundabout && e.name === 'Trg Slavija').length).toBeGreaterThan(3);
     expect(roads.nodes.filter((n) => n.signals).length).toBeGreaterThan(150);
+    const tracks = roads.edges.filter((e) => e.cls === 'tram');
+    expect(tracks.length).toBeGreaterThanOrEqual(40);
+    let trackLength = 0;
+    for (const e of tracks) for (let i = 2; i < e.pts.length; i += 2) trackLength += Math.hypot(e.pts[i]! - e.pts[i - 2]!, e.pts[i + 1]! - e.pts[i - 1]!);
+    expect(trackLength).toBeGreaterThan(8000);
     for (const e of roads.edges) {
       for (let i = 0; i < e.pts.length; i += 2) {
         expect(e.pts[i]!).toBeGreaterThanOrEqual(bounds.x0 - 0.05);

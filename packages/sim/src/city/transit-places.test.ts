@@ -15,7 +15,8 @@ const byId = new Map(city.busStops.map((s) => [s.id, s]));
 
 describe('GTFS stops on curb lanes', () => {
   it('binds nearly every stop that a pattern serves', () => {
-    const served = new Set(transit.patterns.flatMap((p) => p.stops.map((i) => transit.stops[i]!.id)));
+    const road = transit.patterns.filter((p) => transit.lines[p.line]!.mode !== 'tram');
+    const served = new Set(road.flatMap((p) => p.stops.map((i) => transit.stops[i]!.id)));
     const bound = [...served].filter((id) => byId.has(id));
     expect(bound.length / served.size).toBeGreaterThanOrEqual(0.9);
   });

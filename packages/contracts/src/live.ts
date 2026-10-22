@@ -124,7 +124,7 @@ export interface LightPhaseDetail {
   queue: number;
 }
 
-export type TransitMode = 'bus' | 'trolley' | 'minibus';
+export type TransitMode = 'bus' | 'trolley' | 'minibus' | 'tram';
 
 export interface BusDetail {
   id: string;

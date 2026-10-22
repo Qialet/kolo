@@ -124,11 +124,12 @@ describe('importGtfs on a synthetic feed', () => {
     expect(tr.calendar).toEqual({ week: ['N', 'RD', 'RD', 'RD', 'RD', 'RD', 'S'], extra: [['20250502', 'N']] });
   });
 
-  it('drops trams and maps EKO lines to minibus and type 11 to trolley', () => {
+  it('maps type 0 to tram, EKO lines to minibus and type 11 to trolley', () => {
     expect(tr.lines.map((l) => [l.id, l.name, l.mode])).toEqual([
       ['E01', 'EKO1', 'minibus'],
       ['R26', '26', 'bus'],
       ['R27', '27', 'bus'],
+      ['T02', '2', 'tram'],
       ['TR40', '40', 'trolley'],
     ]);
     expect(tr.lines[1]).toMatchObject({ longName: 'Dorćol - Braće Jerković, preko centra', color: '#0098DA', text: '#FFFFFF' });
@@ -136,7 +137,7 @@ describe('importGtfs on a synthetic feed', () => {
   });
 
   it('keeps only in-frame stops of kept patterns, in Latin, with the direction of travel', () => {
-    expect(tr.stops.map((s) => s.id)).toEqual(['S3', 'S4', 'S5']);
+    expect(tr.stops.map((s) => s.id)).toEqual(['S3', 'S4', 'S5', 'S9']);
     expect(tr.stops[0]).toMatchObject({ code: '3', name: 'Slavija', dir: [1, 0] });
     expect(tr.stops[0]!.x).toBeCloseTo(b.x0 + 20, 0);
     expect(tr.stops[1]!.name).toBe('Park "Tašmajdan"');
@@ -199,7 +200,7 @@ describe('buildDistrict with GTFS', () => {
   it('stores the feed, its version and hashes it', () => {
     const d = buildDistrict([], { ...opts, gtfs: feed() });
     expect(d.meta.gtfsVersion).toBe('24');
-    expect(d.transit.stops).toHaveLength(3);
+    expect(d.transit.stops).toHaveLength(4);
     expect(d.meta.version).not.toBe(buildDistrict([], opts).meta.version);
   });
 });
@@ -215,6 +216,11 @@ describe.skipIf(!existsSync(RAW))('importGtfs on the real feed', () => {
     expect(tr.stops.length).toBeGreaterThanOrEqual(120);
     expect(tr.lines.length).toBeGreaterThanOrEqual(90);
     expect(tr.lines.filter((l) => l.mode === 'trolley').length).toBeGreaterThanOrEqual(4);
+    const trams = new Set(tr.lines.flatMap((l, i) => (l.mode === 'tram' ? [i] : [])));
+    expect(trams.size).toBe(10);
+    const tramPatterns = tr.patterns.filter((p) => trams.has(p.line));
+    expect(tramPatterns.length).toBeGreaterThanOrEqual(20);
+    expect(new Set(tramPatterns.flatMap((p) => p.stops)).size).toBeGreaterThanOrEqual(35);
     expect(tr.patterns.length).toBeGreaterThanOrEqual(150);
     const rd = tr.patterns.flatMap((p) => p.profiles).reduce((n, p) => n + (p.starts['RD']?.length ?? 0), 0);
     expect(rd).toBeGreaterThanOrEqual(15_000);

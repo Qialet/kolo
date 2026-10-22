@@ -74,7 +74,7 @@ export const DisputeStatus = {
 export type DisputeStatus = (typeof DisputeStatus)[keyof typeof DisputeStatus];
 
 /** Wire index = position: new kinds go at the end. */
-export const VEHICLE_KINDS = ['TAXI', 'CAR', 'BUS', 'TROLLEY', 'MINIBUS'] as const;
+export const VEHICLE_KINDS = ['TAXI', 'CAR', 'BUS', 'TROLLEY', 'MINIBUS', 'TRAM'] as const;
 export type VehicleKind = (typeof VEHICLE_KINDS)[number];
 
 /** Public transport: runs on the timetable and may use bus-only roads. */
