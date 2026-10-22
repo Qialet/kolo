@@ -6,6 +6,12 @@ import { createRng } from '../rng.js';
 import { Roaming } from './roaming.js';
 import { TrafficSystem } from './traffic.js';
 
+/** Processor time of this test process in ms: unlike the wall clock it does not grow when other test processes compete for the CPU. */
+const cpuMs = () => {
+  const u = process.cpuUsage();
+  return (u.user + u.system) / 1000;
+};
+
 const REAL = new URL('../../../../data/districts/belgrade-center.json', import.meta.url);
 
 describe('background traffic on real Belgrade roads', () => {
@@ -27,11 +33,11 @@ describe('background traffic on real Belgrade roads', () => {
     roaming.onLeave = () => left++;
     roaming.onVanish = () => vanished++;
     for (let i = 0; i < 600 * 20; i++) {
-      const t0 = performance.now();
+      const t0 = cpuMs();
       traffic.step(0.05);
       roaming.step();
       if (i % 20 === 0) roaming.update(300);
-      stepMs += performance.now() - t0;
+      stepMs += cpuMs() - t0;
       if (i % 100 !== 0) continue;
       const byLane = new Map<number, { s: number; len: number }[]>();
       for (const v of traffic.vehicles) {

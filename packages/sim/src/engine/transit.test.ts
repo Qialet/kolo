@@ -10,6 +10,12 @@ import { makeVehicle, TrafficSystem } from './traffic.js';
 import { serviceEpoch, Transit } from './transit.js';
 import { buildTransitNet } from './transit-net.js';
 
+/** Processor time of this test process in ms: unlike the wall clock it does not grow when other test processes compete for the CPU. */
+const cpuMs = () => {
+  const u = process.cpuUsage();
+  return (u.user + u.system) / 1000;
+};
+
 const REAL = new URL('../../../../data/districts/belgrade-center.json', import.meta.url);
 const city = buildCityFromDistrict(JSON.parse(readFileSync(REAL, 'utf8')) as District);
 const net = buildTransitNet(city, city.transit);
@@ -40,9 +46,9 @@ describe('timetable transit', () => {
     let checks = 0;
     let ms = 0;
     for (let i = 0; i < 600 * 20; i++) {
-      const t0 = performance.now();
+      const t0 = cpuMs();
       sim.step(0.05);
-      ms += performance.now() - t0;
+      ms += cpuMs() - t0;
       if (i % 100 !== 0) continue;
       const byLane = new Map<number, { s: number; len: number }[]>();
       for (const v of sim.traffic.vehicles) {

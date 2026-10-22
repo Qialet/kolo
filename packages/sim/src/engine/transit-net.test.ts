@@ -7,12 +7,18 @@ import { segmentDistance } from '../import/polygons.js';
 import { chooseLanes, laneIndexesFor } from './routing.js';
 import { buildTransitNet, patternPoint } from './transit-net.js';
 
+/** Processor time of this test process in ms: unlike the wall clock it does not grow when other test processes compete for the CPU. */
+const cpuMs = () => {
+  const u = process.cpuUsage();
+  return (u.user + u.system) / 1000;
+};
+
 const REAL = new URL('../../../../data/districts/belgrade-center.json', import.meta.url);
 const district = JSON.parse(readFileSync(REAL, 'utf8')) as District;
 const city = buildCityFromDistrict(district);
-const t0 = performance.now();
+const t0 = cpuMs();
 const net = buildTransitNet(city, district.transit);
-const buildMs = performance.now() - t0;
+const buildMs = cpuMs() - t0;
 const stopIndex = new Map(city.busStops.map((s, i) => [s.id, i]));
 
 const shapeOf = (flat: number[]): Vec2[] => Array.from({ length: flat.length / 2 }, (_, i) => ({ x: flat[2 * i]!, z: flat[2 * i + 1]! }));
