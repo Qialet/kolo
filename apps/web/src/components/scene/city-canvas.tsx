@@ -23,6 +23,9 @@ export default function CityCanvas() {
       camera={{ position: homeOf(city).add(HOME_OFFSET).toArray(), zoom: HOME_ZOOM, near: 1, far: 4000 }}
       gl={{ antialias: true, alpha: true, toneMapping: THREE.NeutralToneMapping }}
       onPointerMissed={() => select(null)}
+      onCreated={(state) => {
+        if (process.env.NODE_ENV !== 'production') Object.assign(window, { __koloGl: state });
+      }}
     >
       <SceneLights />
       <CameraRig />

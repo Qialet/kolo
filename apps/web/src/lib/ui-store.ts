@@ -1,6 +1,7 @@
 'use client';
 
 import { create } from 'zustand';
+import type { Lod } from './lod';
 
 export type Selection =
   | { kind: 'taxi'; id: string }
@@ -28,6 +29,8 @@ interface UiState {
   camera: CameraRequest | null;
   cameraCommand: { type: 'zoomIn' | 'zoomOut' | 'rotateLeft' | 'rotateRight' | 'home'; nonce: number } | null;
   labels: boolean;
+  /** Model detail for the current zoom, set by the camera rig. */
+  lod: Lod;
   parkFilter: string | null;
   createOrder: { pickupId?: string; dropoffId?: string } | null;
   select: (s: Selection | null) => void;
@@ -35,6 +38,7 @@ interface UiState {
   focus: (x: number, z: number, opts?: { zoom?: number; follow?: string }) => void;
   command: (type: NonNullable<UiState['cameraCommand']>['type']) => void;
   toggleLabels: () => void;
+  setLod: (lod: Lod) => void;
   setParkFilter: (id: string | null) => void;
   openCreateOrder: (preset?: { pickupId?: string; dropoffId?: string }) => void;
   closeCreateOrder: () => void;
@@ -48,6 +52,7 @@ export const useUi = create<UiState>((set) => ({
   camera: null,
   cameraCommand: null,
   labels: true,
+  lod: 'near',
   parkFilter: null,
   createOrder: null,
   select: (selection) => set({ selection }),
@@ -55,6 +60,7 @@ export const useUi = create<UiState>((set) => ({
   focus: (x, z, opts) => set({ camera: { x, z, nonce: ++nonce, ...opts } }),
   command: (type) => set({ cameraCommand: { type, nonce: ++nonce } }),
   toggleLabels: () => set((s) => ({ labels: !s.labels })),
+  setLod: (lod) => set({ lod }),
   setParkFilter: (parkFilter) => set({ parkFilter }),
   openCreateOrder: (preset) => set({ createOrder: preset ?? {} }),
   closeCreateOrder: () => set({ createOrder: null }),

@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "sync:districts": "node scripts/sync-districts.mjs",
+    "perf": "node scripts/perf.mjs",
     "test": "node --test \"src/**/*.test.mjs\""
   },
   "dependencies": {

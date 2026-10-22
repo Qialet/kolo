@@ -6,6 +6,7 @@ import type { City } from '@kolo/sim';
 import { useEffect, useMemo, useRef, type ComponentRef } from 'react';
 import * as THREE from 'three';
 import { getCity } from '@/lib/city';
+import { nextLod } from '@/lib/lod';
 import { useUi } from '@/lib/ui-store';
 import { livePoses } from './vehicles';
 
@@ -101,6 +102,9 @@ export function CameraRig() {
       c.target.x = x;
       c.target.z = z;
     }
+    const ui = useUi.getState();
+    const lod = nextLod(camera.zoom, ui.lod);
+    if (lod !== ui.lod) ui.setLod(lod);
   });
 
   return (
