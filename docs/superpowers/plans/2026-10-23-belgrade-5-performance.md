@@ -29,20 +29,20 @@
 **Файлы:** создать apps/web/src/lib/lod.ts (+ lod.test.mjs), apps/web/scripts/perf.mjs; изменить lib/ui-store.ts, scene/camera-rig.tsx, scene/city-canvas.tsx, apps/web/package.json.
 **Интерфейсы:** type Lod = 'near' | 'far'; nextLod(zoom, prev): Lod; CHUNK = 400; chunkCells(points: {x, z}[], size?): {key: string, cx: number, cz: number, items: number[]}[] (ключ "cx:cz", порядок по ключу, индексы по возрастанию); shadowExtent(width, height, zoom): number — половина стороны квадрата тени, max(width, height) × 0,75 / zoom, в пределах [200, 1400]. ui-store: lod, setLod. CameraRig в useFrame вызывает setLod только при смене. Хук window.__koloGl (state R3F).
 - perf.mjs: системный Chrome (channel chrome, d3d11), виды overview (−499, −920, зум 0,8), home (0, 0, 4,6), near (−459, −1225, 12); на каждом 120 кадров — среднее и p95 кадра, draw call и треугольники за кадр (обёртка draw* WebGL2); аргумент --cpu N замедляет CPU; --budget сверяет с таблицей бюджета (задача 6) и завершается кодом 1. Скрипт pnpm perf в web.
-- [ ] Тесты: nextLod(2,4, 'far') — far, nextLod(2,4, 'near') — near, nextLod(2,7, 'far') — near, nextLod(2,1, 'near') — far; chunkCells: точки (10, 10) и (399, 0) в одной ячейке, (−1, 0) — в ячейке −1:0; shadowExtent(1600, 1000, 0,8) — 1400, (1600, 1000, 4,6) — 260,9 с точностью 0,1, (1600, 1000, 12) — 200.
-- [ ] pnpm perf печатает таблицу до изменений; коммит feat(web): LOD levels and a frame probe.
+- [x] Тесты: nextLod(2,4, 'far') — far, nextLod(2,4, 'near') — near, nextLod(2,7, 'far') — near, nextLod(2,1, 'near') — far; chunkCells: точки (10, 10) и (399, 0) в одной ячейке, (−1, 0) — в ячейке −1:0; shadowExtent(1600, 1000, 0,8) — 1400, (1600, 1000, 4,6) — 260,9 с точностью 0,1, (1600, 1000, 12) — 200.
+- [x] pnpm perf печатает таблицу до изменений; коммит feat(web): LOD levels and a frame probe.
 
 ### Задача 2: деревья, припаркованные, светофоры, остановки
 **Файлы:** scene/city-static.tsx, scene/vehicles.tsx (ParkedCars), scene/traffic-lights.tsx.
 - Деревья и припаркованные — по InstancedMesh на чанк с собственной сферой; near: как сейчас; far: крона — икосаэдр detail 0, стволы и колёса скрыты, кузов и кабина — BoxGeometry без скруглений, теней не отбрасывают.
 - Светофоры: на far лампы — сфера (0,26, 6, 4); остановки — 4 InstancedMesh на все остановки (крыша, стекло, столб, знак), павильон на платформе выше и развёрнут как сейчас, клик по instanceId выбирает остановку.
-- [ ] pnpm perf: draw call на общем виде меньше 200, треугольники на общем виде меньше 1,2 млн; скриншоты home и overview без видимых отличий near; коммит perf(web): chunked trees and parked cars, instanced stops.
+- [x] pnpm perf: draw call на общем виде меньше 200, треугольники на общем виде меньше 1,2 млн; скриншоты home и overview без видимых отличий near; коммит perf(web): chunked trees and parked cars, instanced stops.
 
 ### Задача 3: здания по чанкам
 **Файлы:** scene/city-geometry.ts (buildBuildingGeometry), scene/city-static.tsx (Buildings), места, где выделение берёт контур здания.
 **Интерфейсы:** buildBuildingChunks(city): {key, geometry, buildings: number[], firstTriangle: Uint32Array}[]; buildingOfTriangle(firstTriangle, face) прежняя — индекс внутри чанка, здание — chunk.buildings[i]. Чанк — по центроиду контура.
 - near — материал с окнами (withWindows), far — тот же цвет без окон: окна на общем виде дают муар.
-- [ ] Скриншоты: клик по зданию в центре и у границы чанка выбирает верное здание (инспектор, контур); коммит perf(web): buildings merged per chunk.
+- [x] Скриншоты: клик по зданию в центре и у границы чанка выбирает верное здание (инспектор, контур); коммит perf(web): buildings merged per chunk.
 
 ### Задача 4: машины, тени, разрешение, подписи
 **Файлы:** scene/vehicles.tsx, scene/camera-rig.tsx (SceneLights), scene/city-canvas.tsx, scene/world-labels.tsx, scene/scene-labels.tsx.
@@ -50,15 +50,15 @@
 - Тень: квадрат shadowExtent вокруг цели, пересчёт камеры тени при изменении больше 10%; mapSize 2048.
 - Canvas: dpr из состояния, PerformanceMonitor drei — при падении dpr 1, при росте обратно до 2, после 3 переключений остаётся 1.
 - LabelProjector пишет transform и visibility только при изменении; на far подписи POI — вес от 3.
-- [ ] Скриншоты: общий вид с тенями по всему району, слежение за такси с переходом уровня; коммит perf(web): far vehicles, view-fitted shadows, adaptive resolution.
+- [x] Скриншоты: общий вид с тенями по всему району, слежение за такси с переходом уровня; коммит perf(web): far vehicles, view-fitted shadows, adaptive resolution.
 
 ### Задача 5: бюджет шага сервера
 **Файлы:** apps/api/src/simulation/simulation.service.ts, simulation.controller.ts; packages/sim/src/engine/simulation.test.ts.
 **Интерфейсы:** SimulationService.stepStats(): {avgMs, maxMs} за последние 60 с; /api/sim/state отдаёт step; предупреждение в лог, если тик дольше 16,7 мс, не чаще раза в минуту.
-- [ ] Тест sim: будни 08:00, 60 такси, плотность по умолчанию, 5 минут: p99 шага по CPU меньше 16 мс, кадр JSON меньше 32 КБ; e2e: state.step есть; коммит feat(api): simulation step budget.
+- [x] Тест sim: будни 08:00, 60 такси, плотность по умолчанию, 5 минут: p99 шага по CPU меньше 16 мс, кадр JSON меньше 32 КБ; e2e: state.step есть; коммит feat(api): simulation step budget.
 
 ### Задача 6: бюджет кадра и доки
 **Файлы:** apps/web/scripts/perf.mjs; docs SIMULATION, ARCHITECTURE, DESIGN, DOMAIN, ROADMAP; CLAUDE.md.
 - Бюджет (треугольники, draw call за кадр): overview — 900 тыс., 200; home — 1,2 млн, 150; near — 900 тыс., 120. Время кадра печатается, но не проверяется: зависит от машины.
 - Доки: уровни и чанки, тени, адаптивный dpr, бюджет сервера и кадра, команда pnpm perf; CLAUDE.md — город из файла района, не из seed; ROADMAP — пункт LOD и доков закрыт, итог Белграда.
-- [ ] pnpm perf --budget зелёный, замеры после — в доке; коммит docs: Belgrade performance and final docs.
+- [x] pnpm perf --budget зелёный, замеры после — в доке; коммит docs: Belgrade performance and final docs.
