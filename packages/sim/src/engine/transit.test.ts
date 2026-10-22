@@ -154,3 +154,68 @@ describe('timetable transit', () => {
     expect(serviceEpoch('20260329', 12 * 3600)).toBe(Date.UTC(2026, 2, 29, 10, 0));
   });
 });
+
+describe('transit details for the console', () => {
+  const sim = new Simulation(city, fleet(4), { startAt: WEEKDAY_1530 });
+  for (let i = 0; i < 30 * 20; i++) sim.step(0.05);
+
+  it('puts the Belgrade clock into every frame and syncs it on command', () => {
+    expect(sim.frame().clock).toBe(sim.clock);
+    const fast = new Simulation(city, fleet(2), { startAt: Date.now() - 3_600_000 });
+    fast.control({ sync: true });
+    expect(Math.abs(fast.clock - Date.now())).toBeLessThan(2000);
+  });
+
+  it('describes a bus on its line', () => {
+    const trip = [...sim.transit.trips.values()].find((t) => t.phase === 'drive' && t.next < t.pattern.stops.length)!;
+    const d = sim.busDetail(trip.id)!;
+    const line = city.busLines[trip.pattern.line]!;
+    expect(d.lineId).toBe(line.id);
+    expect(d.lineName).toBe(line.name);
+    expect(d.color).toBe(line.color);
+    expect(d.kind).toBe(trip.v.kind);
+    expect(d.headsign).toBe(trip.pattern.headsign);
+    expect(d.delaySec).toBe(trip.delaySec);
+    expect(d.nextStop).toBe(city.busStops[trip.pattern.stops[trip.next]!.stop]!.name);
+    expect(d.nextStopAt).toBeGreaterThan(sim.clock - 600_000);
+    expect(sim.busDetail('nope')).toBeNull();
+  });
+
+  it('lists the next departures at a stop', () => {
+    const busy = [...city.busStops].sort((a, b) => b.lines.length - a.lines.length)[0]!;
+    const d = sim.stopDetail(busy.id)!;
+    expect(d.name).toBe(busy.name);
+    expect(d.code).toBe(busy.code);
+    expect(d.lines.length).toBe(busy.lines.length);
+    expect(d.departures.length).toBeGreaterThan(0);
+    expect(d.departures.length).toBeLessThanOrEqual(8);
+    let prev = 0;
+    for (const dep of d.departures) {
+      expect(dep.expectedAt).toBeGreaterThanOrEqual(prev);
+      expect(dep.expectedAt).toBeGreaterThanOrEqual(sim.clock - 1000);
+      expect(dep.expectedAt).toBeLessThanOrEqual(sim.clock + 3_600_000 + 600_000);
+      expect(busy.lines).toContain(dep.lineId);
+      if (dep.vehicleId) expect(sim.transit.byVehicle.has(dep.vehicleId)).toBe(true);
+      prev = dep.expectedAt;
+    }
+    expect(d.departures.some((x) => x.vehicleId)).toBe(true);
+    expect(sim.stopDetail('nope')).toBeNull();
+  });
+
+  it('describes a line by direction', () => {
+    const id = city.busLines.find((l) => l.name === '26')!.id;
+    const d = sim.lineDetail(id)!;
+    expect(d.name).toBe('26');
+    expect(d.directions.length).toBe(2);
+    for (const dir of d.directions) {
+      expect(dir.stops.length).toBeGreaterThan(1);
+      expect(dir.route.length).toBeGreaterThan(10);
+      expect(dir.headwayMin).toBeGreaterThan(0);
+      expect(dir.headwayMin).toBeLessThan(30);
+      expect(dir.nextDepartureAt).toBeGreaterThanOrEqual(sim.clock - 1000);
+    }
+    expect(d.vehicles.length).toBeGreaterThan(0);
+    for (const v of d.vehicles) expect(sim.transit.byVehicle.get(v.id)?.pattern.line).toBe(city.busLines.findIndex((l) => l.id === id));
+    expect(sim.lineDetail('nope')).toBeNull();
+  });
+});

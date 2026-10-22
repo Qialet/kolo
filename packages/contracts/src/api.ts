@@ -39,6 +39,8 @@ export const SimControlInput = z.object({
   paused: z.boolean().optional(),
   trafficDensity: z.number().min(0).max(1).optional(),
   demand: z.number().min(0).max(3).optional(),
+  /** Set the simulation clock back to real time; public transport is rebuilt on the timetable. */
+  sync: z.literal(true).optional(),
 });
 export type SimControlInput = z.infer<typeof SimControlInput>;
 

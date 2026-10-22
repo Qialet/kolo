@@ -83,7 +83,7 @@ function OrderLabels({ id }: { id: string }) {
 
 function BusLabel({ id }: { id: string }) {
   const { data } = useBus(id);
-  return <Tag anchor={{ follow: id, y: 6 }} title={`Автобус ${data?.line ?? ''}`} status={data ? `→ ${data.nextStop}` : undefined} />;
+  return <Tag anchor={{ follow: id, y: 6 }} title={`Автобус ${data?.lineName ?? ''}`} status={data ? `→ ${data.nextStop}` : undefined} />;
 }
 
 function HoverPlate({ id }: { id: string }) {

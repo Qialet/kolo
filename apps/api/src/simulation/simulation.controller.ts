@@ -34,6 +34,16 @@ export class SimulationController {
     return this.simulation.sim.busDetail(id) ?? notFound('Bus');
   }
 
+  @Get('stops/:id')
+  stop(@Param('id') id: string) {
+    return this.simulation.sim.stopDetail(id) ?? notFound('Stop');
+  }
+
+  @Get('lines/:id')
+  line(@Param('id') id: string) {
+    return this.simulation.sim.lineDetail(id) ?? notFound('Line');
+  }
+
   @Get('lights/:id')
   light(@Param('id', ParseIntPipe) id: number) {
     return this.simulation.sim.lightDetail(id) ?? notFound('Traffic light');

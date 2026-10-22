@@ -16,6 +16,8 @@ export type LightTuple = number[];
 export interface LiveFrame {
   /** Simulation clock in seconds. */
   t: number;
+  /** Belgrade clock of the simulation (ms since epoch): the timetable runs on it; ahead of wall time after running fast. */
+  clock: number;
   /** Wall clock (ms since epoch) at which the frame was produced. */
   wall: number;
   vehicles: VehicleTuple[];
@@ -122,16 +124,73 @@ export interface LightPhaseDetail {
   queue: number;
 }
 
+export type TransitMode = 'bus' | 'trolley' | 'minibus';
+
 export interface BusDetail {
   id: string;
-  line: string;
+  kind: VehicleKind;
+  /** GTFS route_id. */
+  lineId: string;
+  /** Number on the vehicle. */
   lineName: string;
+  color: string;
+  textColor: string;
+  headsign: string;
   speedKmh: number;
   nextStop: string;
+  /** Expected arrival at the next stop (ms since epoch, simulation clock); null after the last one. */
+  nextStopAt: number | null;
   etaSec: number;
+  /** Seconds behind the timetable at the last departure; negative when early. */
+  delaySec: number;
   dwellLeftSec: number;
   passengers: number;
   route: RoutePoint[];
+}
+
+export interface StopDeparture {
+  lineId: string;
+  name: string;
+  color: string;
+  textColor: string;
+  headsign: string;
+  /** Timetable departure and the expected one (with the vehicle's delay), ms since epoch. */
+  scheduledAt: number;
+  expectedAt: number;
+  /** Vehicle already on its way, or null for a trip not yet started. */
+  vehicleId: string | null;
+}
+
+export interface StopDetail {
+  id: string;
+  /** Number on the pole. */
+  code: string;
+  name: string;
+  x: number;
+  z: number;
+  lines: { id: string; name: string; color: string; textColor: string; mode: TransitMode }[];
+  /** Up to 8 departures within the next hour. */
+  departures: StopDeparture[];
+}
+
+export interface LineDirection {
+  headsign: string;
+  stops: { id: string; name: string }[];
+  /** Median minutes between departures from the first stop within the next hour; null if fewer than two. */
+  headwayMin: number | null;
+  nextDepartureAt: number | null;
+  route: RoutePoint[];
+}
+
+export interface LineDetail {
+  id: string;
+  name: string;
+  longName: string;
+  mode: TransitMode;
+  color: string;
+  textColor: string;
+  directions: LineDirection[];
+  vehicles: { id: string; kind: VehicleKind; headsign: string; delaySec: number }[];
 }
 
 export interface VehicleBrief {

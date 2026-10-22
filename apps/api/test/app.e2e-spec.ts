@@ -2,6 +2,7 @@ import { Test } from '@nestjs/testing';
 import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { AppModule } from '../src/app.module.js';
+import { SimulationService } from '../src/simulation/simulation.service.js';
 
 // Needs the local Postgres from .env (see CLAUDE.md).
 describe('Kolo API (e2e)', () => {
@@ -34,5 +35,25 @@ describe('Kolo API (e2e)', () => {
   it('GET /api/sim/state reports the district version', async () => {
     const res = await request(app.getHttpServer()).get('/api/sim/state').expect(200);
     expect(res.body.districtVersion).toMatch(/^[0-9a-f]{8}$/);
+  });
+
+  it('GET /api/sim/stops/:id and /api/sim/lines/:id describe the timetable', async () => {
+    const { city } = app.get(SimulationService);
+    const stop = city.busStops[0]!;
+    const res = await request(app.getHttpServer()).get(`/api/sim/stops/${stop.id}`).expect(200);
+    expect(res.body.name).toBe(stop.name);
+    expect(Array.isArray(res.body.departures)).toBe(true);
+    await request(app.getHttpServer()).get('/api/sim/stops/nope').expect(404);
+    const line = city.busLines[0]!;
+    const lineRes = await request(app.getHttpServer()).get(`/api/sim/lines/${line.id}`).expect(200);
+    expect(lineRes.body.name).toBe(line.name);
+    expect(lineRes.body.directions.length).toBeGreaterThan(0);
+    await request(app.getHttpServer()).get('/api/sim/lines/nope').expect(404);
+  });
+
+  it('POST /api/sim/control {sync: true} returns the state', async () => {
+    const res = await request(app.getHttpServer()).post('/api/sim/control').send({ sync: true }).expect(201);
+    expect(res.body.districtVersion).toMatch(/^[0-9a-f]{8}$/);
+    await request(app.getHttpServer()).post('/api/sim/control').send({ sync: false }).expect(400);
   });
 });

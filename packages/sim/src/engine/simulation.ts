@@ -5,6 +5,9 @@ import {
   VEHICLE_KINDS,
   type Actor,
   type BusDetail,
+  type LineDetail,
+  type StopDeparture,
+  type StopDetail,
   type FleetStatus,
   type LightControlInput,
   type LightDetail,
@@ -31,7 +34,7 @@ import { cycleOf, signalState } from './signals.js';
 import { Roaming } from './roaming.js';
 import { makeVehicle, TrafficSystem, type Vehicle } from './traffic.js';
 import { Transit } from './transit.js';
-import { buildTransitNet } from './transit-net.js';
+import { buildTransitNet, patternPoint, type NetPattern } from './transit-net.js';
 
 export interface FleetVehicleSeed {
   id: string;
@@ -841,6 +844,7 @@ export class Simulation {
     if (input.paused !== undefined) this.paused = input.paused;
     if (input.trafficDensity !== undefined) this.trafficDensity = input.trafficDensity;
     if (input.demand !== undefined) this.demand = input.demand;
+    if (input.sync) this.syncClock();
   }
 
   setLight(nodeId: number, input: LightControlInput): boolean {
@@ -900,7 +904,7 @@ export class Simulation {
           ] as LightTuple)
         : null,
     );
-    return { t: Math.round(this.traffic.t * 100) / 100, wall: Date.now(), vehicles, lights };
+    return { t: Math.round(this.traffic.t * 100) / 100, clock: this.clock, wall: Date.now(), vehicles, lights };
   }
 
   kpi(): LiveKpi {
@@ -998,22 +1002,94 @@ export class Simulation {
     const line = this.city.busLines[trip.pattern.line]!;
     const next = trip.pattern.stops[trip.next];
     const clock = this.clock;
-    const eta = next ? Math.max(0, Math.round((this.transit.arrivalAt(trip, trip.next) - clock) / 1000 + trip.delaySec)) : 0;
+    const nextStopAt = next ? this.transit.arrivalAt(trip, trip.next) + trip.delaySec * 1000 : null;
     return {
       id,
-      line: line.id,
+      kind: v.kind,
+      lineId: line.id,
       lineName: line.name,
+      color: line.color,
+      textColor: line.textColor,
+      headsign: trip.pattern.headsign,
       speedKmh: Math.round(v.speed * 36) / 10,
       nextStop: next ? this.city.busStops[next.stop]!.name : '—',
-      etaSec: eta,
+      nextStopAt,
+      etaSec: nextStopAt === null ? 0 : Math.max(0, Math.round((nextStopAt - clock) / 1000)),
+      delaySec: trip.delaySec,
       dwellLeftSec: trip.phase === 'dwell' ? Math.max(0, Math.round((trip.dwellUntil - clock) / 1000)) : 0,
-      passengers: 8 + (Number(id.slice(1)) * 37) % 50,
+      passengers: 8 + ((Number(id.slice(1)) * 37) % 50),
       route: this.traffic.routeOf(v).points.slice(0, 40).map((p) => ({ x: round(p.x), z: round(p.z) })),
     };
+  }
+
+  /** Next departures at a stop within the hour, with the delay of vehicles already on their way. */
+  stopDetail(id: string): StopDetail | null {
+    const index = this.city.busStops.findIndex((s) => s.id === id);
+    if (index < 0) return null;
+    const stop = this.city.busStops[index]!;
+    const clock = this.clock;
+    const departures: StopDeparture[] = [];
+    for (const t of this.transit.tripsBetween(clock - TRIP_LOOKBACK, clock + HOUR)) {
+      const active = this.transit.trips.get(t.key);
+      // Under way by the timetable but not on the map: missed or already gone.
+      if (!active && t.spawnAt <= clock) continue;
+      t.pattern.stops.forEach((st, k) => {
+        if (st.stop !== index || (active && active.next > k)) return;
+        const scheduledAt = this.transit.departureAt(t, k);
+        const expectedAt = scheduledAt + (active ? active.delaySec * 1000 : 0);
+        if (expectedAt < clock || expectedAt > clock + HOUR) return;
+        const line = this.city.busLines[t.pattern.line]!;
+        departures.push({ lineId: line.id, name: line.name, color: line.color, textColor: line.textColor, headsign: t.pattern.headsign, scheduledAt, expectedAt, vehicleId: active?.id ?? null });
+      });
+    }
+    departures.sort((a, b) => a.expectedAt - b.expectedAt);
+    const lines = this.city.busLines.filter((l) => stop.lines.includes(l.id)).map((l) => ({ id: l.id, name: l.name, color: l.color, textColor: l.textColor, mode: l.mode }));
+    return { id, code: stop.code, name: stop.name, x: round(stop.x), z: round(stop.z), lines, departures: departures.slice(0, STOP_DEPARTURES) };
+  }
+
+  /** A line by direction: its main variant's stops and route, headway and next departure within the hour. */
+  lineDetail(id: string): LineDetail | null {
+    const index = this.city.busLines.findIndex((l) => l.id === id);
+    if (index < 0) return null;
+    const line = this.city.busLines[index]!;
+    const clock = this.clock;
+    const upcoming = this.transit.tripsBetween(clock - TRIP_LOOKBACK, clock + HOUR).filter((t) => t.pattern.line === index);
+    const byDir = new Map<number, NetPattern[]>();
+    for (const p of this.transit.net.byLine.get(id) ?? []) {
+      const dir = this.city.transit.patterns[p.index]!.dir;
+      byDir.set(dir, [...(byDir.get(dir) ?? []), p]);
+    }
+    const directions = [...byDir.entries()]
+      .sort(([a], [b]) => a - b)
+      .map(([, patterns]) => {
+        const trips = upcoming.filter((t) => patterns.includes(t.pattern));
+        const count = (p: NetPattern) => trips.filter((t) => t.pattern === p).length * 1000 + p.stops.length;
+        const main = patterns.reduce((a, b) => (count(b) > count(a) ? b : a));
+        const starts = trips.map((t) => t.startAt).filter((at) => at >= clock && at <= clock + HOUR).sort((a, b) => a - b);
+        const gaps = starts.slice(1).map((at, i) => at - starts[i]!).sort((a, b) => a - b);
+        const route = [];
+        for (let at = 0; at <= main.length; at += ROUTE_STEP) route.push(patternPoint(this.city, main, at));
+        return {
+          headsign: main.headsign,
+          stops: main.stops.map((st) => ({ id: this.city.busStops[st.stop]!.id, name: this.city.busStops[st.stop]!.name })),
+          headwayMin: gaps.length ? Math.round(gaps[gaps.length >> 1]! / 60_000) : null,
+          nextDepartureAt: starts[0] ?? null,
+          route: route.map((p) => ({ x: round(p.x), z: round(p.z) })),
+        };
+      });
+    const vehicles = [...this.transit.trips.values()].filter((t) => t.pattern.line === index).map((t) => ({ id: t.id, kind: t.v.kind, headsign: t.pattern.headsign, delaySec: t.delaySec }));
+    return { id, name: line.name, longName: line.longName, mode: line.mode, color: line.color, textColor: line.textColor, directions, vehicles };
   }
 }
 
 const round = (n: number) => Math.round(n * 100) / 100;
+
+const HOUR = 3_600_000;
+/** Trips that started this long ago may still be ahead of a stop. */
+const TRIP_LOOKBACK = 3 * HOUR;
+const STOP_DEPARTURES = 8;
+/** Line routes are sent as points this many metres apart. */
+const ROUTE_STEP = 25;
 
 const placeRef = (p: Place): PlaceRef => ({ addressId: p.id, label: p.label, x: round(p.x), z: round(p.z) });
 

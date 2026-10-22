@@ -389,8 +389,8 @@ function BusInspector({ id }: { id: string }) {
       <InspectorHeader
         icon={<BusFrontIcon className="size-5" />}
         iconClass="bg-bus text-white"
-        eyebrow={`Автобус · линия ${data.line}`}
-        title={data.lineName}
+        eyebrow={`Автобус · линия ${data.lineName}`}
+        title={data.headsign}
         subtitle={`${data.speedKmh} км/ч · ${data.passengers} пассажиров`}
         onFocus={() => {
           const p = frameBuffer.find(id);

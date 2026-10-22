@@ -68,7 +68,7 @@
 ### Задача 6: контракты и API
 **Файлы:** packages/contracts live.ts и api.ts; apps/api simulation.controller.ts, live.gateway.ts, simulation.service.ts; e2e.
 **Интерфейсы:** LiveFrame.clock (epoch ms симуляции); SimControlInput.sync (true); BusDetail + kind, lineId, color, headsign, delaySec, nextStopAt; StopDetail {id, code, name, lines, departures: {lineId, name, color, headsign, scheduledAt, expectedAt, vehicleId}[] — до 8 в ближайшие 60 мин}; LineDetail {id, name, longName, mode, color, textColor, directions: {headsign, stops: {id, name}[], headwayMin | null (медиана интервалов отправлений с первой остановки за ближайший час), nextDepartureAt, route}[], vehicles}; GET /api/sim/stops/:id и /api/sim/lines/:id.
-- [ ] e2e: остановка и линия 404 и 200, control {sync: true} возвращает state; коммит feat(api): transit clock, stop and line details.
+- [x] e2e: остановка и линия 404 и 200, control {sync: true} возвращает state; коммит feat(api): transit clock, stop and line details.
 
 ### Задача 7: сцена — ОТ, контактная сеть, остановки
 **Файлы:** scene/vehicles.tsx, city-static.tsx, city-geometry.ts, overlays.tsx, lib/palette.ts, DESIGN.md.
