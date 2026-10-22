@@ -19,6 +19,7 @@ import { turnBetween } from '../engine/routing.js';
 import { cycleOf } from '../engine/signals.js';
 import { largestStronglyConnected } from '../graph.js';
 import type { District, RoadClass, RoadEdge } from './district.js';
+import { buildTwins } from './corridors.js';
 import { layoutDepots } from './depots.js';
 import { addPlaces, parkCars } from './places.js';
 import { addTransit } from './transit-places.js';
@@ -409,6 +410,7 @@ export function buildCityFromDistrict(district: District): City {
   }
   void signalPoints;
   for (const id of largestCarScc(city)) city.segments[id]!.core = true;
+  buildTwins(city);
   for (const e of edges.values()) {
     if (e.src.cls === 'tram') city.tracks.push({ points: e.pts, layer: e.src.layer });
     else city.roads.push(roadStrip(e));

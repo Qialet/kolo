@@ -1,4 +1,5 @@
 import { isTransitKind, type LightMode, type VehicleKind } from '@kolo/contracts';
+import { twinPos } from '../city/corridors.js';
 import { lanePoint } from '../city/lanes.js';
 import type { City, Connector, CurbRef, Lane, Segment } from '../city/types.js';
 import { dist, dot, polyline, poseAlong, poseAt, type Polyline, type Pose, type Vec2 } from '../geometry.js';
@@ -62,6 +63,8 @@ interface OccEntry {
 }
 
 const YARD_SPEED = 3.2;
+/** Vehicles longer than this keep the junction they left busy until their tail is out. */
+const LONG_TAIL = 15;
 /** Seconds stopped at a stop line after which a driver no longer yields (see gateOpen). */
 const IMPATIENCE = 20;
 
@@ -251,6 +254,7 @@ export class TrafficSystem {
 
   /** Free curb space check before a pulled-over vehicle merges back. */
   private canMerge(v: Vehicle): boolean {
+    if (v.pullOffset === 0) return true;
     for (const e of this.occ[v.lane]!) {
       if (e.v === v) continue;
       if (e.pos > v.s - 16 && e.pos - e.v.length < v.s + 4) return false;
@@ -258,14 +262,21 @@ export class TrafficSystem {
     return true;
   }
 
-  /** No vehicle on the lane (driving, pulled over or turning into it) with its body within `room` metres of `s`. */
-  isLaneFree(laneId: number, s: number, room: number): boolean {
+  /**
+   * No vehicle on the lane (driving, pulled over or turning into it) with its body within `room` metres of `s`,
+   * nor on a lane lying on top of it there.
+   */
+  isLaneFree(laneId: number, s: number, room: number, twins = true): boolean {
     for (const o of this.vehicles) {
       let front: number;
       if ((o.mode === 'lane' || o.mode === 'pulled') && o.lane === laneId) front = o.s;
       else if (o.mode === 'conn' && this.city.connectors[o.conn]!.to === laneId) front = o.s - this.city.connectors[o.conn]!.line.length;
       else continue;
       if (front > s - room && front - o.length < s + room) return false;
+    }
+    if (!twins) return true;
+    for (const t of this.city.lanes[laneId]!.twins ?? []) {
+      if (s + room >= t.s0 && s - room <= t.s1 && !this.isLaneFree(t.lane, twinPos(t, s), room, false)) return false;
     }
     return true;
   }
@@ -316,9 +327,14 @@ export class TrafficSystem {
     this.occupied.length = 0;
     this.connBusy.fill(0);
     for (const v of this.vehicles) {
-      if (v.mode === 'lane') {
+      // A tram at its stop stands in the lane (no pull to the kerb): it still blocks the lane.
+      if (v.mode === 'lane' || (v.mode === 'pulled' && v.pullOffset === 0)) {
         this.occupy(v.lane, v, v.s);
-        if (v.committed >= 0) this.connBusy[v.committed]!++;
+        if (v.mode === 'lane' && v.committed >= 0) this.connBusy[v.committed]!++;
+        // The tail of a tram is still in the junction it came through. Shorter vehicles do not hold it:
+        // on chains of 2–3 m lanes (Slavija) every car would, and the holds lock into cycles.
+        const step = v.path[v.pathIdx];
+        if (v.length > LONG_TAIL && v.s < v.length && step && step.lane === v.lane && step.conn >= 0) this.connBusy[step.conn]!++;
       } else if (v.mode === 'conn') {
         const c = city.connectors[v.conn]!;
         this.occupy(c.to, v, v.s - c.line.length);
@@ -332,10 +348,15 @@ export class TrafficSystem {
     }
   }
 
-  private occupy(laneId: number, v: Vehicle, pos: number) {
+  /** Puts a vehicle on a lane's occupancy list, and a ghost of it on every twin lane its body overlaps. */
+  private occupy(laneId: number, v: Vehicle, pos: number, ghosts = true) {
     const list = this.occ[laneId]!;
     if (!list.length) this.occupied.push(laneId);
     list.push({ v, pos });
+    if (!ghosts) return;
+    for (const t of this.city.lanes[laneId]!.twins ?? []) {
+      if (pos >= t.s0 && pos - v.length <= t.s1) this.occupy(t.lane, v, twinPos(t, pos), false);
+    }
   }
 
   /** Nearest vehicle ahead of `pos` on a lane's occupancy list. */
@@ -426,43 +447,44 @@ export class TrafficSystem {
     if (v.stoppedFor > IMPATIENCE) return true;
     if (flashing) {
       const myRank = city.segments[city.lanes[c.from]!.seg]!.rank;
-      if (this.approachingConflict(node.in, c, (seg) => seg.rank > myRank, 32)) return false;
-      if (c.turn === 'L' && this.approachingOpposite(node.in, c, 30)) return false;
-    } else if (c.turn === 'L' && this.approachingOpposite(node.in, c, 40)) {
+      if (this.approachingConflict(v, node.in, c, (seg) => seg.rank > myRank, 32)) return false;
+      if (c.turn === 'L' && this.approachingOpposite(v, node.in, c, 30)) return false;
+    } else if (c.turn === 'L' && this.approachingOpposite(v, node.in, c, 40)) {
       return false;
     }
     return true;
   }
 
   /** Vehicles close to the stop line on matching approaches whose next connector crosses `c`. */
-  private approachingConflict(inSegs: number[], c: Connector, filter: (seg: Segment) => boolean, range: number) {
+  private approachingConflict(self: Vehicle, inSegs: number[], c: Connector, filter: (seg: Segment) => boolean, range: number) {
     const { city } = this;
     for (const segId of inSegs) {
       const seg = city.segments[segId]!;
       if (!filter(seg)) continue;
-      if (this.anyApproaching(seg.lanes, c, range, false)) return true;
+      if (this.anyApproaching(self, seg.lanes, c, range, false)) return true;
     }
     return false;
   }
 
-  private approachingOpposite(inSegs: number[], c: Connector, range: number) {
+  private approachingOpposite(self: Vehicle, inSegs: number[], c: Connector, range: number) {
     const { city } = this;
     const myDir = city.segments[city.lanes[c.from]!.seg]!.dirOut;
     for (const segId of inSegs) {
       const seg = city.segments[segId]!;
       if (dot(seg.dirOut, myDir) > -0.8) continue;
       // Opposing left turners do not yield to each other (they turn simultaneously).
-      if (this.anyApproaching(seg.lanes, c, range, true)) return true;
+      if (this.anyApproaching(self, seg.lanes, c, range, true)) return true;
     }
     return false;
   }
 
-  private anyApproaching(lanes: number[], c: Connector, range: number, ignoreLeftTurners: boolean) {
+  /** Another vehicle (`self` may show up as a ghost on a twin lane) about to take a move that crosses `c`. */
+  private anyApproaching(self: Vehicle, lanes: number[], c: Connector, range: number, ignoreLeftTurners: boolean) {
     const { city } = this;
     for (const laneId of lanes) {
       const lane = city.lanes[laneId]!;
       for (const e of this.occ[laneId]!) {
-        if (e.pos > lane.length || e.v.mode !== 'lane') continue;
+        if (e.v === self || e.pos > lane.length || e.v.mode !== 'lane') continue;
         const d = lane.length - e.pos;
         if (d > range) continue;
         if (e.v.speed < 1.2 && d > 6) continue;

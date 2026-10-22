@@ -85,6 +85,17 @@ export interface Lane {
   offset: number;
   out: number[];
   in: number[];
+  /** Stretches shared with a lane lying on top of this one (a tram track on a street lane). */
+  twins?: Twin[];
+}
+
+/** Positions [s0, s1] of a lane map linearly onto [t0, t1] of the twin `lane`: vehicles on one see those on the other. */
+export interface Twin {
+  lane: number;
+  s0: number;
+  s1: number;
+  t0: number;
+  t1: number;
 }
 
 export interface Connector {
