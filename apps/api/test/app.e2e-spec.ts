@@ -37,6 +37,13 @@ describe('Kolo API (e2e)', () => {
     expect(res.body.districtVersion).toMatch(/^[0-9a-f]{8}$/);
   });
 
+  it('GET /api/sim/state reports the step time of the last minute', async () => {
+    const res = await request(app.getHttpServer()).get('/api/sim/state').expect(200);
+    expect(res.body.step.avgMs).toBeGreaterThanOrEqual(0);
+    expect(res.body.step.maxMs).toBeGreaterThanOrEqual(res.body.step.avgMs);
+    expect(res.body.step.maxMs).toBeLessThan(1000);
+  });
+
   it('GET /api/sim/stops/:id and /api/sim/lines/:id describe the timetable', async () => {
     const { city } = app.get(SimulationService);
     const stop = city.busStops[0]!;

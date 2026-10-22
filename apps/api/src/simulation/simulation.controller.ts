@@ -10,7 +10,7 @@ export class SimulationController {
   @Get('state')
   state() {
     const sim = this.simulation.sim;
-    return { kpi: sim.kpi(), speed: sim.speed, paused: sim.paused, trafficDensity: sim.trafficDensity, demand: sim.demand, districtVersion: this.simulation.city.version };
+    return { kpi: sim.kpi(), speed: sim.speed, paused: sim.paused, trafficDensity: sim.trafficDensity, demand: sim.demand, districtVersion: this.simulation.city.version, step: this.simulation.stepStats() };
   }
 
   @Post('control')

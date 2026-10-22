@@ -10,6 +10,10 @@ const TICK_MS = 50;
 const FRAME_MS = 100;
 const KPI_MS = 1000;
 const RECENT_EVENTS = 60;
+/** A step may take a third of the tick; the rest is left for sockets, REST and the database queue. */
+const STEP_BUDGET_MS = TICK_MS / 3;
+/** Step times of the last minute of ticks. */
+const STEP_WINDOW = 60_000 / TICK_MS;
 
 /**
  * Runs the authoritative city simulation in-process and persists its business events.
@@ -27,6 +31,9 @@ export class SimulationService implements OnModuleInit, OnApplicationBootstrap, 
   readonly orders$ = new Subject<OrderSummary>();
   readonly recentEvents: LiveEvent[] = [];
   private timer: NodeJS.Timeout | null = null;
+  private stepTimes = new Float64Array(STEP_WINDOW);
+  private stepCount = 0;
+  private lastBudgetWarning = -Infinity;
   /** Serialises writes so an order row always exists before its events. */
   private writes: Promise<unknown> = Promise.resolve();
   private parkNames = new Map<string, string>();
@@ -87,6 +94,7 @@ export class SimulationService implements OnModuleInit, OnApplicationBootstrap, 
       const dt = (now - last) / 1000;
       last = now;
       this.sim.tick(dt);
+      this.recordStep(performance.now() - now);
       frameAcc += dt * 1000;
       kpiAcc += dt * 1000;
       if (frameAcc >= FRAME_MS) {
@@ -103,6 +111,29 @@ export class SimulationService implements OnModuleInit, OnApplicationBootstrap, 
   async onModuleDestroy() {
     if (this.timer) clearInterval(this.timer);
     await this.writes;
+  }
+
+  /** Average and longest simulation step over the last minute, ms. */
+  stepStats() {
+    const n = Math.min(this.stepCount, STEP_WINDOW);
+    let sum = 0;
+    let max = 0;
+    for (let i = 0; i < n; i++) {
+      sum += this.stepTimes[i]!;
+      max = Math.max(max, this.stepTimes[i]!);
+    }
+    return { avgMs: n ? Math.round((sum / n) * 100) / 100 : 0, maxMs: Math.round(max * 100) / 100 };
+  }
+
+  private recordStep(ms: number) {
+    this.stepTimes[this.stepCount++ % STEP_WINDOW] = ms;
+    const now = performance.now();
+    if (ms > STEP_BUDGET_MS && now - this.lastBudgetWarning > 60_000) {
+      this.lastBudgetWarning = now;
+      this.log.warn(
+        `Simulation step took ${ms.toFixed(1)} ms, over the ${STEP_BUDGET_MS.toFixed(1)} ms budget (speed ×${this.sim.speed}, ${this.sim.traffic.vehicles.length} vehicles)`,
+      );
+    }
   }
 
   parkName(id: string) {
