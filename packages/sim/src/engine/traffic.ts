@@ -114,6 +114,8 @@ export class TrafficSystem {
   readonly signals: (SignalRuntime | null)[];
   signalStates: (SignalState | null)[];
   private occ: OccEntry[][];
+  /** Lanes with entries in occ: only these are cleared and sorted on the next rebuild. */
+  private occupied: number[] = [];
   private connBusy: Int16Array;
   t = 0;
 
@@ -310,20 +312,30 @@ export class TrafficSystem {
 
   private rebuildOccupancy() {
     const { city } = this;
-    for (const list of this.occ) list.length = 0;
+    for (const lane of this.occupied) this.occ[lane]!.length = 0;
+    this.occupied.length = 0;
     this.connBusy.fill(0);
     for (const v of this.vehicles) {
       if (v.mode === 'lane') {
-        this.occ[v.lane]!.push({ v, pos: v.s });
+        this.occupy(v.lane, v, v.s);
         if (v.committed >= 0) this.connBusy[v.committed]!++;
       } else if (v.mode === 'conn') {
         const c = city.connectors[v.conn]!;
-        this.occ[c.to]!.push({ v, pos: v.s - c.line.length });
-        this.occ[c.from]!.push({ v, pos: city.lanes[c.from]!.length + v.s });
+        this.occupy(c.to, v, v.s - c.line.length);
+        this.occupy(c.from, v, city.lanes[c.from]!.length + v.s);
         this.connBusy[v.conn]!++;
       }
     }
-    for (const list of this.occ) if (list.length > 1) list.sort((a, b) => a.pos - b.pos);
+    for (const lane of this.occupied) {
+      const list = this.occ[lane]!;
+      if (list.length > 1) list.sort((a, b) => a.pos - b.pos);
+    }
+  }
+
+  private occupy(laneId: number, v: Vehicle, pos: number) {
+    const list = this.occ[laneId]!;
+    if (!list.length) this.occupied.push(laneId);
+    list.push({ v, pos });
   }
 
   /** Nearest vehicle ahead of `pos` on a lane's occupancy list. */
