@@ -237,7 +237,8 @@ function BusStops({ city }: { city: City }) {
           key={stop.id}
           // Tram-only stops: the shelter stands on the platform.
           position={[stop.x, platformOf(city, stop) ? LEVEL.platform : LEVEL.ground, stop.z]}
-          rotation-y={stop.heading}
+          // On a platform left of the track the shelter turns round to face it.
+          rotation-y={stop.heading + ((stop.platform ?? 0) < 0 ? Math.PI : 0)}
           onClick={(e) => {
             e.stopPropagation();
             select({ kind: 'stop', id: stop.id });

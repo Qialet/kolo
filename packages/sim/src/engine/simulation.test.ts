@@ -51,7 +51,7 @@ describe('Simulation', () => {
       }
     }
     const kpi = sim.kpi();
-    const stuck = sim.traffic.vehicles.filter((v) => (v.mode === 'lane' || v.mode === 'conn') && v.stoppedFor > 120);
+    const stuck = sim.traffic.vehicles.filter((v) => (v.mode === 'lane' || v.mode === 'conn') && v.stoppedFor > sim.traffic.waitLimit(v));
     expect(stuck.map((v) => v.id)).toEqual([]);
     expect(overlaps / Math.max(1, checks)).toBeLessThan(0.002);
     expect(kpi.avgSpeedKmh).toBeGreaterThan(8);

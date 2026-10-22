@@ -495,13 +495,16 @@ function slice(line: Lane['line'], a: number, b: number): Vec2[] {
 const GAUGE_HALF = 0.5;
 const RAIL_WIDTH = 0.08;
 const BALLAST_HALF = 1.3;
-const PLATFORM = { width: 2.2, length: 30, height: 0.3, lateral: 2.6 } as const;
+const PLATFORM = { width: 2.2, length: 30, height: 0.3 } as const;
 
-/** A tram stopped at s has its front there: the platform runs back from it. */
+/**
+ * A tram stopped at s has its front there: the platform runs back from it, on the side of the
+ * track the city chose clear of car lanes (none where the track runs between them).
+ */
 export const platformOf = (city: City, stop: City['busStops'][number]) => {
-  if (!stop.rail || stop.lane !== stop.rail.lane) return null;
+  if (!stop.rail || stop.platform === undefined) return null;
   const lane = city.lanes[stop.rail.lane]!;
-  return poseAlong(lane.line, Math.max(PLATFORM.length / 2, stop.rail.s - PLATFORM.length / 2), PLATFORM.lateral);
+  return poseAlong(lane.line, Math.max(PLATFORM.length / 2, stop.rail.s - PLATFORM.length / 2), stop.platform);
 };
 
 /**

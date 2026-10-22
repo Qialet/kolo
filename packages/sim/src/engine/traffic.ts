@@ -5,7 +5,7 @@ import type { City, Connector, CurbRef, Lane, Segment } from '../city/types.js';
 import { dist, dot, polyline, poseAlong, poseAt, type Polyline, type Pose, type Vec2 } from '../geometry.js';
 import type { Rng } from '../rng.js';
 import { chooseLanes, laneIndexesFor, routeSegments, turnBetween } from './routing.js';
-import { isFlashing, signalState, type SignalRuntime, type SignalState } from './signals.js';
+import { cycleOf, isFlashing, signalState, type SignalRuntime, type SignalState } from './signals.js';
 
 export type VehicleMode = 'lane' | 'conn' | 'pulled' | 'yard' | 'parked';
 
@@ -55,6 +55,8 @@ export interface Vehicle {
   straightPreference: number;
   odometer: number;
   stoppedFor: number;
+  /** Long vehicles: junction curves left behind (odometer when the front left them), held while the body still covers them. */
+  tail: { conn: number; at: number }[];
 }
 
 interface OccEntry {
@@ -67,6 +69,10 @@ const YARD_SPEED = 3.2;
 const LONG_TAIL = 15;
 /** Seconds stopped at a stop line after which a driver no longer yields (see gateOpen). */
 const IMPATIENCE = 20;
+/** A driver waiting this long at a line they may cross gets the junction: newcomers on crossing paths hold back. */
+const STARVING = 30;
+/** A vehicle this close behind another one's tail queues behind it. */
+const QUEUE_BEHIND = 20;
 
 export function makeDriver(rng: Rng, kind: VehicleKind): DriverProfile {
   if (kind === 'TRAM') return { v0Factor: rng.range(0.9, 0.95), aMax: 1.0, bComf: 1.5, headway: 2.0, minGap: 3 };
@@ -124,6 +130,7 @@ export function makeVehicle(id: string, kind: VehicleKind, rng: Rng, long = fals
     straightPreference: rng.chance(0.55) ? 1 : 0,
     odometer: 0,
     stoppedFor: 0,
+    tail: [],
   };
 }
 
@@ -135,6 +142,10 @@ export class TrafficSystem {
   /** Lanes with entries in occ: only these are cleared and sorted on the next rebuild. */
   private occupied: number[] = [];
   private connBusy: Int16Array;
+  /** Per node: someone has waited over STARVING at one of its lines (this step). */
+  private starving: Uint8Array;
+  /** Per node: a tram track leads into it. */
+  private railIn: Uint8Array;
   t = 0;
 
   constructor(readonly city: City) {
@@ -142,6 +153,8 @@ export class TrafficSystem {
     this.signalStates = this.signals.map((s) => (s ? signalState(s, 0) : null));
     this.occ = city.lanes.map(() => []);
     this.connBusy = new Int16Array(city.connectors.length);
+    this.starving = new Uint8Array(city.nodes.length);
+    this.railIn = Uint8Array.from(city.nodes, (n) => (n.in.some((s) => city.segments[s]!.rail) ? 1 : 0));
   }
 
   add(v: Vehicle) {
@@ -237,6 +250,7 @@ export class TrafficSystem {
     v.pathIdx = 0;
     v.stop = null;
     v.committed = -1;
+    v.tail.length = 0;
     this.updatePose(v);
   }
 
@@ -246,12 +260,14 @@ export class TrafficSystem {
     v.conn = -1;
     v.speed = 0;
     v.path = [];
+    v.tail.length = 0;
     v.stop = null;
     v.pose = { ...pose };
   }
 
   startYard(v: Vehicle, points: Vec2[], end: 'parked' | 'pulled', endLane = -1, endS = 0) {
     v.mode = 'yard';
+    v.tail.length = 0;
     v.yard = polyline(points);
     v.yardEnd = end;
     v.s = 0;
@@ -294,6 +310,38 @@ export class TrafficSystem {
       if (s + room >= t.s0 && s - room <= t.s1 && !this.isLaneFree(t.lane, twinPos(t, s), room, false)) return false;
     }
     return true;
+  }
+
+  /**
+   * Seconds a vehicle may stand before it counts as stuck: a cycle plus 30 s when it is first at a
+   * red stop line (a four-phase light keeps one approach red for over two minutes), else 120 s.
+   */
+  waitLimit(v: Vehicle): number {
+    const next = v.path[v.pathIdx + 1];
+    if (v.mode !== 'lane' || !next || this.city.lanes[v.lane]!.length - v.s > 2) return 120;
+    const c = this.city.connectors[next.conn]!;
+    const sig = this.signals[c.node];
+    const aspect = this.signalStates[c.node]?.aspects[c.phase];
+    return sig && (aspect === 'RED' || aspect === 'RED_AMBER') ? Math.max(120, cycleOf(sig.plan) + 30) : 120;
+  }
+
+  /**
+   * Someone stands right behind a vehicle: in its lane (ghosts from a twin lane included), or, when its
+   * tail is near the lane start, at the stop line of a lane whose next curve leads into it.
+   */
+  queuedBehind(v: Vehicle): boolean {
+    const tail = v.s - v.length;
+    for (const e of this.occ[v.lane] ?? []) if (e.v !== v && e.pos <= tail + 0.5 && e.pos > tail - QUEUE_BEHIND && e.v.speed < 1) return true;
+    const room = QUEUE_BEHIND - tail;
+    if (room <= 0) return false;
+    for (const id of this.city.lanes[v.lane]!.in) {
+      const c = this.city.connectors[id]!;
+      const from = this.city.lanes[c.from]!;
+      for (const e of this.occ[c.from]!) {
+        if (e.v !== v && e.v.lane === c.from && e.pos > from.length - room && e.v.speed < 1 && e.v.path[e.v.pathIdx + 1]?.conn === c.id) return true;
+      }
+    }
+    return false;
   }
 
   isLaneStartFree(laneId: number, room: number): boolean {
@@ -341,20 +389,25 @@ export class TrafficSystem {
     for (const lane of this.occupied) this.occ[lane]!.length = 0;
     this.occupied.length = 0;
     this.connBusy.fill(0);
+    this.starving.fill(0);
     for (const v of this.vehicles) {
       // A tram at its stop stands in the lane (no pull to the kerb): it still blocks the lane.
       if (v.mode === 'lane' || (v.mode === 'pulled' && v.pullOffset === 0)) {
         this.occupy(v.lane, v, v.s);
         if (v.mode === 'lane' && v.committed >= 0) this.connBusy[v.committed]!++;
-        // The tail of a tram is still in the junction it came through. Shorter vehicles do not hold it:
-        // on chains of 2–3 m lanes (Slavija) every car would, and the holds lock into cycles.
-        const step = v.path[v.pathIdx];
-        if (v.length > LONG_TAIL && v.s < v.length && step && step.lane === v.lane && step.conn >= 0) this.connBusy[step.conn]!++;
+        if (v.mode === 'lane' && v.stoppedFor > STARVING) this.starving[city.segments[city.lanes[v.lane]!.seg]!.to] = 1;
       } else if (v.mode === 'conn') {
         const c = city.connectors[v.conn]!;
         this.occupy(c.to, v, v.s - c.line.length);
         this.occupy(c.from, v, city.lanes[c.from]!.length + v.s);
         this.connBusy[v.conn]!++;
+      }
+      // The tail of a tram is still in the junction curves it came through. Shorter vehicles do not hold
+      // them: on chains of 2–3 m lanes (Slavija) every car would, and the holds lock into cycles.
+      if (v.tail.length) {
+        const gone = v.tail.findLastIndex((t) => v.odometer - t.at >= v.length);
+        if (gone >= 0) v.tail.splice(0, gone + 1);
+        for (const t of v.tail) this.connBusy[t.conn]!++;
       }
     }
     for (const lane of this.occupied) {
@@ -423,7 +476,11 @@ export class TrafficSystem {
       if (v.mode === 'lane' && v.committed !== next.conn && toEnd < Math.max(45, (v.speed * v.speed) / (2 * v.drv.bComf) + 15)) {
         const open = this.gateOpen(v, c, toEnd);
         if (open) {
-          if (toEnd < Math.max(2.5, v.speed * 1.3 + 1.5)) v.committed = c.id;
+          // Counted at once: a crossing vehicle deciding later in this step must see it.
+          if (toEnd < Math.max(2.5, v.speed * 1.3 + 1.5)) {
+            v.committed = c.id;
+            this.connBusy[c.id]!++;
+          }
         } else {
           consider(toEnd - 0.6 + v.drv.minGap, 0);
         }
@@ -457,9 +514,17 @@ export class TrafficSystem {
     for (const e of this.occ[c.to]!) {
       if (e.pos - e.v.length < v.length + 2 && e.pos > -1 && e.v.speed < 2) return false;
     }
+    if (this.starving[node.id] && this.starvingCrosser(v, node.in, c)) return false;
     // After a long wait at the line a driver stops yielding to traffic that is not actually moving
     // in (crossing paths are still checked above): breaks mutual-yield deadlocks.
     if (v.stoppedFor > IMPATIENCE) return true;
+    // Turning across the tracks, even on a green, cars let a tram coming up go first (not one standing at its line).
+    if (this.railIn[node.id] && !city.segments[city.lanes[c.from]!.seg]!.rail) {
+      for (const segId of node.in) {
+        const seg = city.segments[segId]!;
+        if (seg.rail && this.anyApproaching(v, seg.lanes, c, 40, false, true)) return false;
+      }
+    }
     if (flashing) {
       const myRank = city.segments[city.lanes[c.from]!.seg]!.rank;
       if (this.approachingConflict(v, node.in, c, (seg) => seg.rank > myRank, 32)) return false;
@@ -468,6 +533,37 @@ export class TrafficSystem {
       return false;
     }
     return true;
+  }
+
+  /**
+   * Someone first at another line of the junction, waiting longer than `v` (and over STARVING) with a
+   * light that lets them go, whose next curve crosses `c`: a stream of newcomers must not starve them.
+   */
+  private starvingCrosser(v: Vehicle, inSegs: number[], c: Connector): boolean {
+    const { city } = this;
+    for (const segId of inSegs) {
+      for (const laneId of city.segments[segId]!.lanes) {
+        const list = this.occ[laneId]!;
+        const lane = city.lanes[laneId]!;
+        // The first real occupant from the line back (ghosts and vehicles already in the junction skipped).
+        for (let i = list.length - 1; i >= 0; i--) {
+          const e = list[i]!;
+          if (e.v.lane !== laneId || e.pos > lane.length) continue;
+          const w = e.v;
+          if (w !== v && w.mode === 'lane' && lane.length - e.pos < 3 && w.stoppedFor > STARVING && w.stoppedFor > v.stoppedFor) {
+            const next = w.path[w.pathIdx + 1];
+            if (next && c.conflicts.includes(next.conn)) {
+              const theirs = city.connectors[next.conn]!;
+              const st = this.signalStates[theirs.node];
+              const aspect = st && !isFlashing(st) ? st.aspects[theirs.phase] : 'GREEN';
+              if (aspect === 'GREEN' || aspect === 'AMBER') return true;
+            }
+          }
+          break;
+        }
+      }
+    }
+    return false;
   }
 
   /** Vehicles close to the stop line on matching approaches whose next connector crosses `c`. */
@@ -494,12 +590,14 @@ export class TrafficSystem {
   }
 
   /** Another vehicle (`self` may show up as a ghost on a twin lane) about to take a move that crosses `c`. */
-  private anyApproaching(self: Vehicle, lanes: number[], c: Connector, range: number, ignoreLeftTurners: boolean) {
+  private anyApproaching(self: Vehicle, lanes: number[], c: Connector, range: number, ignoreLeftTurners: boolean, movingOwn = false) {
     const { city } = this;
     for (const laneId of lanes) {
       const lane = city.lanes[laneId]!;
       for (const e of this.occ[laneId]!) {
         if (e.v === self || e.pos > lane.length || e.v.mode !== 'lane') continue;
+        // movingOwn: vehicles really on this lane (not ghosts from a twin lane) and under way.
+        if (movingOwn && (e.v.lane !== laneId || e.v.speed < 1.2)) continue;
         const d = lane.length - e.pos;
         if (d > range) continue;
         if (e.v.speed < 1.2 && d > 6) continue;
@@ -542,6 +640,7 @@ export class TrafficSystem {
       if (v.s >= lane.length) {
         const next = v.path[v.pathIdx + 1];
         if (next && (v.committed === next.conn || this.gateOpen(v, city.connectors[next.conn]!, 0))) {
+          if (v.committed !== next.conn) this.connBusy[next.conn]!++;
           v.mode = 'conn';
           v.conn = next.conn;
           v.s -= lane.length;
@@ -560,6 +659,7 @@ export class TrafficSystem {
         v.s -= c.line.length;
         v.lane = c.to;
         v.conn = -1;
+        if (v.length > LONG_TAIL) v.tail.push({ conn: c.id, at: v.odometer - v.s });
         // Keep the consumed prefix short.
         if (v.pathIdx > 8) {
           v.path.splice(0, v.pathIdx);

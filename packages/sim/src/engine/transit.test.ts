@@ -44,6 +44,9 @@ const isRail = (lane: number) => !!city.segments[city.lanes[lane]!.seg]!.rail;
 /** Standing or driving in a lane (a tram at its stop stands in its lane too). */
 const inLane = (v: Vehicle) => v.mode === 'lane' || (v.mode === 'pulled' && v.pullOffset === 0);
 
+/** Standing where its body lies over a lane cars share. */
+const onTwin = (v: Vehicle) => (city.lanes[v.lane]!.twins ?? []).some((t) => v.s >= t.s0 && v.s - v.length <= t.s1);
+
 /** Pairs of vehicles on two lanes lying on top of each other whose bodies overlap there (and pairs checked). */
 function twinOverlaps(sim: Simulation): { overlaps: number; checks: number } {
   const byLane = new Map<number, Vehicle[]>();
@@ -75,6 +78,7 @@ describe('timetable transit', () => {
     let checks = 0;
     let ms = 0;
     let maxTrams = 0;
+    let maxSharedDwell = 0;
     for (let i = 0; i < 600 * 20; i++) {
       const t0 = cpuMs();
       sim.step(0.05);
@@ -84,6 +88,12 @@ describe('timetable transit', () => {
       overlaps += shared.overlaps;
       checks += shared.checks;
       maxTrams = Math.max(maxTrams, trams(sim).length);
+      // An early tram does not wait for its time on a lane cars share: it would hold the street up.
+      for (const trip of sim.transit.trips.values()) {
+        const v = trip.v;
+        if (v.kind !== 'TRAM' || trip.phase !== 'dwell' || !onTwin(v)) continue;
+        maxSharedDwell = Math.max(maxSharedDwell, trip.dwellUntil - sim.clock);
+      }
       const byLane = new Map<number, { s: number; len: number }[]>();
       for (const v of sim.traffic.vehicles) {
         expect(Number.isFinite(v.pose.x) && Number.isFinite(v.pose.z), v.id).toBe(true);
@@ -98,6 +108,8 @@ describe('timetable transit', () => {
             if (node.signal && lane.length - v.s < 10) expect(v.stoppedFor, v.id).toBeLessThanOrEqual(cycleOf(node.signal) + 30);
           }
         }
+        // Nobody waits past the limit anywhere (a cycle and a half minute when first at a red light).
+        if (v.mode === 'lane' || v.mode === 'conn') expect(v.stoppedFor, v.id).toBeLessThanOrEqual(sim.traffic.waitLimit(v));
         // Nobody is stuck on a lane shared with a track.
         if (v.mode === 'lane' && city.lanes[v.lane]!.twins) expect(v.stoppedFor, v.id).toBeLessThan(120);
         if (!inLane(v)) continue;
@@ -113,6 +125,7 @@ describe('timetable transit', () => {
         }
       }
     }
+    expect(maxSharedDwell).toBeLessThanOrEqual(30_000);
     expect(sim.clock).toBe(WEEKDAY_1530 + 600_000);
     expect(transitVehicles(sim).length).toBeGreaterThanOrEqual(100);
     const { servedStops, missedStops, byMode } = sim.transit.stats;

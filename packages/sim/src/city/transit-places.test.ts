@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { isTransitKind } from '@kolo/contracts';
 import { dist, dot, poseAlong } from '../geometry.js';
+import { segmentDistance } from '../import/polygons.js';
 import { createRng } from '../rng.js';
 import { makeVehicle } from '../engine/traffic.js';
 import type { District } from './district.js';
@@ -58,6 +59,33 @@ describe('GTFS stops on curb lanes', () => {
     });
     // Brankov most (both platforms): its tram tracks run up the bridge ramp, 400 m from any track in the graph.
     expect(both.length).toBeGreaterThanOrEqual(17);
+  });
+
+  it('lays tram-only platforms beside the track, clear of every car lane', () => {
+    const tramOnly = city.busStops.filter((s) => s.rail && s.lane === s.rail.lane);
+    const withPlatform = tramOnly.filter((s) => s.platform !== undefined);
+    // Most of the 17 tram-only stops have room on one side or the other.
+    expect(withPlatform.length).toBeGreaterThanOrEqual(12);
+    const streetLanes = city.lanes.filter((l) => !city.segments[l.seg]!.rail && city.segments[l.seg]!.layer >= 0);
+    for (const stop of withPlatform) {
+      const track = city.lanes[stop.rail!.lane]!;
+      expect(Math.abs(stop.platform!)).toBeCloseTo(2.6);
+      const mid = Math.max(15, stop.rail!.s - 15);
+      for (let s = mid - 15; s <= mid + 15; s += 3) {
+        for (const off of [-1.1, 0, 1.1]) {
+          const p = poseAlong(track.line, s, stop.platform! + off);
+          for (const lane of streetLanes) {
+            const half = city.streets[city.segments[lane.seg]!.street]!.laneWidth / 2;
+            if (Math.abs(lane.start.x - p.x) > lane.length + 40 && Math.abs(lane.end.x - p.x) > lane.length + 40) continue;
+            const { points } = lane.line;
+            for (let i = 1; i < points.length; i++) expect(segmentDistance(p, points[i - 1]!, points[i]!), `${stop.name} on lane ${lane.id}`).toBeGreaterThanOrEqual(half);
+          }
+        }
+      }
+      // The shelter stands on its platform.
+      const at = poseAlong(track.line, stop.rail!.s, stop.platform!);
+      expect(dist(at, stop)).toBeLessThan(0.01);
+    }
   });
 
   it('puts every stop on a street-level curb lane running its way, within 30 m', () => {

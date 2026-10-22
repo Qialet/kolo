@@ -14,8 +14,41 @@ const STOP_START = 10;
 const STOP_END = 4;
 /** Shelter centre measured from the kerb into the sidewalk. */
 const SHELTER_BEHIND_KERB = 1.6;
-/** Shelter on the platform of a tram-only stop, right of the track axis. */
+/** Platform of a tram-only stop: centre this far from the track axis, its width and the length back from the stop. */
 const PLATFORM_OFFSET = 2.6;
+const PLATFORM_HALF_WIDTH = 1.1;
+const PLATFORM_LENGTH = 30;
+
+/** Every street lane above ground, for keeping tram platforms off them. */
+function streetLanes(city: City): SegmentGrid<number> {
+  const grid = new SegmentGrid<number>();
+  for (const lane of city.lanes) {
+    const seg = city.segments[lane.seg]!;
+    if (seg.rail || seg.layer < 0) continue;
+    const half = city.streets[seg.street]!.laneWidth / 2;
+    const { points } = lane.line;
+    for (let i = 1; i < points.length; i++) grid.add(points[i - 1]!, points[i]!, half);
+  }
+  return grid;
+}
+
+/**
+ * Side of the track for a tram-only platform running back from the stop: right if no car lane
+ * reaches into it, else left, else none (the track runs between car lanes).
+ */
+function platformSide(streets: SegmentGrid<number>, track: Lane, s: number): number | undefined {
+  const mid = Math.max(PLATFORM_LENGTH / 2, s - PLATFORM_LENGTH / 2);
+  const clear = (lateral: number) => {
+    for (let at = mid - PLATFORM_LENGTH / 2; at <= mid + PLATFORM_LENGTH / 2; at += 3) {
+      for (const off of [-PLATFORM_HALF_WIDTH, 0, PLATFORM_HALF_WIDTH]) {
+        const p = poseAlong(track.line, at, lateral + off);
+        for (const { a, b, item } of streets.near(p, 4)) if (segmentDistance(p, a, b) < item) return false;
+      }
+    }
+    return true;
+  };
+  return [PLATFORM_OFFSET, -PLATFORM_OFFSET].find(clear);
+}
 
 /**
  * Street-level curb lanes (bus-only roads included; tunnels and bridge decks not) indexed for stop binding,
@@ -82,13 +115,15 @@ export function addTransit(city: City, transit: DistrictTransit) {
   }
   const curbs = curbLanes(city);
   const tracks = curbLanes(city, true);
+  const streets = streetLanes(city);
   transit.stops.forEach((raw, i) => {
     const curb = byRoad.has(i) ? bindStop(curbs, raw) : null;
     const rail = byTram.has(i) ? bindStop(tracks, raw, TRAM_STOP_REACH) : null;
     const hit = curb ?? rail;
     if (!hit) return;
     const pose = poseAlong(hit.lane.line, hit.s);
-    const behind = curb ? city.streets[city.segments[hit.lane.seg]!.street]!.laneWidth / 2 + SHELTER_BEHIND_KERB : PLATFORM_OFFSET;
+    const platform = curb ? undefined : platformSide(streets, hit.lane, hit.s);
+    const behind = curb ? city.streets[city.segments[hit.lane.seg]!.street]!.laneWidth / 2 + SHELTER_BEHIND_KERB : (platform ?? PLATFORM_OFFSET);
     const at = lanePoint(city, hit.lane.id, hit.s, behind);
     const stop: BusStop = {
       id: raw.id,
@@ -102,6 +137,7 @@ export function addTransit(city: City, transit: DistrictTransit) {
       lines: [...linesAt[i]!],
     };
     if (rail) stop.rail = { lane: rail.lane.id, s: rail.s };
+    if (platform !== undefined) stop.platform = platform;
     city.busStops.push(stop);
   });
 }

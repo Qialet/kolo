@@ -234,6 +234,8 @@ export interface BusStop extends CurbRef {
   lines: string[];
   /** Where trams stop, on their track (also lane and s when no bus calls here). */
   rail?: CurbRef;
+  /** Tram-only stops: the platform centre, metres right (+) or left (−) of the track axis; absent where no side is clear of car lanes. */
+  platform?: number;
 }
 
 export interface BusLine {

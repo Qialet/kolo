@@ -58,7 +58,7 @@ describe('background traffic on real Belgrade roads', () => {
     const moving = traffic.vehicles.filter((v) => v.mode === 'lane' || v.mode === 'conn');
     const avgKmh = (moving.reduce((a, v) => a + v.speed, 0) / moving.length) * 3.6;
     const congestion = moving.filter((v) => v.stoppedFor > 4).length / moving.length;
-    const stuck = moving.filter((v) => v.stoppedFor > 120);
+    const stuck = moving.filter((v) => v.stoppedFor > traffic.waitLimit(v));
     console.log(
       `roaming: avg ${avgKmh.toFixed(1)} km/h, congestion ${congestion.toFixed(2)}, stuck ${stuck.length}, ` +
         `step ${(stepMs / 12000).toFixed(2)} ms, entered ${entered}, left ${left}, vanished ${vanished}, overlaps ${overlaps}/${checks}`,

@@ -80,6 +80,8 @@ export interface Trip extends ScheduledTrip {
   /** Index into pattern.segs of the segment the current leg starts on. */
   segIdx: number;
   dwellUntil: number;
+  /** End of boarding; from then on a tram standing in its lane stops waiting for its time once someone queues behind it. */
+  boardUntil: number;
   /** Seconds behind the timetable at the last departure (negative: early). */
   delaySec: number;
 }
@@ -231,7 +233,7 @@ export class Transit {
 
   private create(t: ScheduledTrip, next: number, phase: TripPhase, segIdx: number): Trip {
     const v = makeVehicle(`B${++this.seq}`, KIND[t.pattern.mode], this.rng, isLongTram(t));
-    const trip: Trip = { ...t, id: v.id, v, phase, next, segIdx, dwellUntil: 0, delaySec: 0 };
+    const trip: Trip = { ...t, id: v.id, v, phase, next, segIdx, dwellUntil: 0, boardUntil: Infinity, delaySec: 0 };
     this.traffic.add(v);
     this.trips.set(t.key, trip);
     this.byVehicle.set(v.id, trip);
@@ -298,7 +300,8 @@ export class Transit {
           else if (!this.planLeg(trip)) this.finish(trip);
         }
       } else if (trip.phase === 'dwell') {
-        if (clockMs < trip.dwellUntil) continue;
+        // Early on the timetable, a tram stops holding its stop for the tram or car queued behind it.
+        if (clockMs < trip.dwellUntil && (clockMs < trip.boardUntil || v.pullOffset !== 0 || !this.traffic.queuedBehind(v))) continue;
         const k = trip.next - 1;
         if (trip.next >= p.stops.length && p.exitSeg < 0) {
           this.finish(trip);
@@ -341,7 +344,12 @@ export class Transit {
       return;
     }
     const late = (clockMs - this.departureAt(trip, k)) / 1000;
-    trip.dwellUntil = late > LATE ? clockMs + this.rng.range(8, 12) * 1000 : Math.max(clockMs + this.rng.range(15, 30) * 1000, this.departureAt(trip, k));
+    const dwell = clockMs + this.rng.range(15, 30) * 1000;
+    // A tram standing over a lane cars share does not hold for its time: it would block the street.
+    const v = trip.v;
+    const blocking = v.pullOffset === 0 && (this.city.lanes[v.lane]!.twins ?? []).some((t) => v.s >= t.s0 && v.s - v.length <= t.s1);
+    trip.dwellUntil = late > LATE ? clockMs + this.rng.range(8, 12) * 1000 : blocking ? dwell : Math.max(dwell, this.departureAt(trip, k));
+    trip.boardUntil = Math.min(dwell, trip.dwellUntil);
   }
 
   /** Leaves the stop, merging into the lane the next turn needs. */
