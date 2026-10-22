@@ -6,18 +6,26 @@ import { SegmentGrid } from './places.js';
 import type { BusStop, City, Lane } from './types.js';
 
 const STOP_REACH = 30;
+/** A tram stop's platform lies along its track: the pole is closer than to a kerb. */
+const TRAM_STOP_REACH = 25;
 /** Lane direction may differ from the stop's direction of travel by at most 60°. */
 const STOP_ALIGN = Math.cos(Math.PI / 3);
 const STOP_START = 10;
 const STOP_END = 4;
 /** Shelter centre measured from the kerb into the sidewalk. */
 const SHELTER_BEHIND_KERB = 1.6;
+/** Shelter on the platform of a tram-only stop, right of the track axis. */
+const PLATFORM_OFFSET = 2.6;
 
-/** Street-level curb lanes (bus-only roads included; tunnels, bridge decks and tram tracks not) indexed for stop binding. */
-function curbLanes(city: City): SegmentGrid<{ lane: Lane; s0: number }> {
+/**
+ * Street-level curb lanes (bus-only roads included; tunnels and bridge decks not) indexed for stop binding,
+ * or with `rail` the tram tracks outside tunnels.
+ */
+function curbLanes(city: City, rail = false): SegmentGrid<{ lane: Lane; s0: number }> {
   const grid = new SegmentGrid<{ lane: Lane; s0: number }>();
   for (const seg of city.segments) {
-    if (seg.layer !== 0 || seg.rail) continue;
+    // Tram stops may stand on a viaduct (Mostar); bus stops only at street level.
+    if (!!seg.rail !== rail || seg.layer < 0 || (!rail && seg.layer !== 0)) continue;
     const lane = city.lanes[seg.lanes[seg.lanes.length - 1]!]!;
     if (lane.length < STOP_START + STOP_END) continue;
     const { points, cum } = lane.line;
@@ -26,15 +34,15 @@ function curbLanes(city: City): SegmentGrid<{ lane: Lane; s0: number }> {
   return grid;
 }
 
-/** Nearest curb lane within 30 m running the stop's way, or null. */
-export function bindStop(grid: SegmentGrid<{ lane: Lane; s0: number }>, stop: DistrictStop): { lane: Lane; s: number } | null {
+/** Nearest lane of the grid within `reach` (30 m) running the stop's way, or null. */
+export function bindStop(grid: SegmentGrid<{ lane: Lane; s0: number }>, stop: DistrictStop, reach = STOP_REACH): { lane: Lane; s: number } | null {
   const p = { x: stop.x, z: stop.z };
   const dir = { x: stop.dir[0], z: stop.dir[1] };
   const dirLen = Math.hypot(dir.x, dir.z) || 1;
   let best: { lane: Lane; s: number; d: number } | null = null;
-  for (const { a, b, item } of grid.near(p, STOP_REACH)) {
+  for (const { a, b, item } of grid.near(p, reach)) {
     const d = segmentDistance(p, a, b);
-    if (d > STOP_REACH || (best && d >= best.d)) continue;
+    if (d > reach || (best && d >= best.d)) continue;
     const len = Math.hypot(b.x - a.x, b.z - a.z) || 1;
     const u: Vec2 = { x: (b.x - a.x) / len, z: (b.z - a.z) / len };
     if ((u.x * dir.x + u.z * dir.z) / dirLen < STOP_ALIGN) continue;
@@ -55,29 +63,34 @@ export function stopPickup(city: City, stop: BusStop): boolean {
   return !!seg.core && !seg.psvOnly && lane.length >= PICKUP_LANE;
 }
 
-/** Lines of the district and its stops bound to curb lanes; stops without a fitting lane are left out. */
+/**
+ * Lines of the district and their stops: bus stops bound to curb lanes, tram stops to their tracks
+ * (a stop served by both gets both); stops without a fitting lane are left out.
+ */
 export function addTransit(city: City, transit: DistrictTransit) {
   city.transit = transit;
   for (const l of transit.lines) city.busLines.push({ id: l.id, name: l.name, longName: l.longName, mode: l.mode, color: l.color, textColor: l.text });
   const linesAt = transit.stops.map(() => new Set<string>());
-  // Tram stops are bound to the tracks in plan 4, task 4; until then trams have no stops of their own.
   const byRoad = new Set<number>();
+  const byTram = new Set<number>();
   for (const p of transit.patterns) {
-    if (transit.lines[p.line]!.mode === 'tram') continue;
+    const line = transit.lines[p.line]!;
     for (const i of p.stops) {
-      linesAt[i]!.add(transit.lines[p.line]!.id);
-      byRoad.add(i);
+      linesAt[i]!.add(line.id);
+      (line.mode === 'tram' ? byTram : byRoad).add(i);
     }
   }
-  const grid = curbLanes(city);
+  const curbs = curbLanes(city);
+  const tracks = curbLanes(city, true);
   transit.stops.forEach((raw, i) => {
-    if (!byRoad.has(i)) return;
-    const hit = bindStop(grid, raw);
+    const curb = byRoad.has(i) ? bindStop(curbs, raw) : null;
+    const rail = byTram.has(i) ? bindStop(tracks, raw, TRAM_STOP_REACH) : null;
+    const hit = curb ?? rail;
     if (!hit) return;
-    const street = city.streets[city.segments[hit.lane.seg]!.street]!;
     const pose = poseAlong(hit.lane.line, hit.s);
-    const at = lanePoint(city, hit.lane.id, hit.s, street.laneWidth / 2 + SHELTER_BEHIND_KERB);
-    city.busStops.push({
+    const behind = curb ? city.streets[city.segments[hit.lane.seg]!.street]!.laneWidth / 2 + SHELTER_BEHIND_KERB : PLATFORM_OFFSET;
+    const at = lanePoint(city, hit.lane.id, hit.s, behind);
+    const stop: BusStop = {
       id: raw.id,
       code: raw.code,
       name: raw.name,
@@ -87,6 +100,8 @@ export function addTransit(city: City, transit: DistrictTransit) {
       z: at.z,
       heading: pose.heading,
       lines: [...linesAt[i]!],
-    });
+    };
+    if (rail) stop.rail = { lane: rail.lane.id, s: rail.s };
+    city.busStops.push(stop);
   });
 }

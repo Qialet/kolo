@@ -69,6 +69,7 @@ const LONG_TAIL = 15;
 const IMPATIENCE = 20;
 
 export function makeDriver(rng: Rng, kind: VehicleKind): DriverProfile {
+  if (kind === 'TRAM') return { v0Factor: rng.range(0.9, 0.95), aMax: 1.0, bComf: 1.5, headway: 2.0, minGap: 3 };
   if (isTransitKind(kind)) return { v0Factor: rng.range(0.82, 0.9), aMax: 1.1, bComf: 2.2, headway: 1.5, minGap: 2.5 };
   return {
     v0Factor: rng.range(0.88, 1.08),
@@ -79,11 +80,17 @@ export function makeDriver(rng: Rng, kind: VehicleKind): DriverProfile {
   };
 }
 
-export function makeVehicle(id: string, kind: VehicleKind, rng: Rng): Vehicle {
+/** Tram lengths: CAF Urbos 3 (long) and Tatra KT4. */
+const TRAM_LONG = 33;
+const TRAM_SHORT = 19;
+
+/** `long` picks the long tram (CAF Urbos 3) over the Tatra KT4. */
+export function makeVehicle(id: string, kind: VehicleKind, rng: Rng, long = false): Vehicle {
   return {
     id,
     kind,
-    length: kind === 'BUS' || kind === 'TROLLEY' ? 12 : kind === 'MINIBUS' ? 7.5 : kind === 'TAXI' ? 4.6 : rng.range(4.1, 4.9),
+    length:
+      kind === 'TRAM' ? (long ? TRAM_LONG : TRAM_SHORT) : kind === 'BUS' || kind === 'TROLLEY' ? 12 : kind === 'MINIBUS' ? 7.5 : kind === 'TAXI' ? 4.6 : rng.range(4.1, 4.9),
     drv: makeDriver(rng, kind),
     mode: 'parked',
     lane: -1,
@@ -97,7 +104,8 @@ export function makeVehicle(id: string, kind: VehicleKind, rng: Rng): Vehicle {
     committed: -1,
     lateral: 0,
     lateralTarget: 0,
-    pullOffset: isTransitKind(kind) ? 3.1 : 2.5,
+    // A tram stops on its track.
+    pullOffset: kind === 'TRAM' ? 0 : isTransitKind(kind) ? 3.1 : 2.5,
     yard: null,
     yardEnd: 'parked',
     yardEndS: 0,

@@ -116,6 +116,8 @@ export class Transit {
     if (list) return list;
     list = [];
     for (const pattern of this.net.patterns) {
+      // Trams join the timetable in plan 4, task 5.
+      if (pattern.mode === 'tram') continue;
       const first = pattern.stops[0]!.timeIdx;
       const last = pattern.stops[pattern.stops.length - 1]!.timeIdx;
       for (const profile of pattern.profiles) {
@@ -211,7 +213,7 @@ export class Transit {
       this.planLeg(trip);
       return true;
     }
-    const stop = this.city.busStops[p.stops[0]!.stop]!;
+    const stop = p.stops[0]!;
     if (!this.traffic.isLaneFree(stop.lane, stop.s, PLACE_ROOM)) return false;
     const trip = this.create(t, 1, 'dwell', p.stops[0]!.segIdx);
     trip.dwellUntil = this.departureAt(t, 0);
@@ -243,7 +245,7 @@ export class Transit {
     const target = p.stops[next];
     const end = target ? target.segIdx : p.segs.length - 1;
     const chain = p.segs.slice(segIdx, end + 1);
-    const toLane = target ? this.city.busStops[target.stop]!.lane : -1;
+    const toLane = target ? target.lane : -1;
     if (chain.length === 1) return { toLane, steps: [] };
     const steps = chooseLanes(this.city, chain, fromLane, toLane, laneIndexesFor(this.city, chain, 0, target ? 'curb' : 'any'));
     return steps ? { toLane, steps } : null;
@@ -418,7 +420,7 @@ export class Transit {
   }
 
   private placeAtStop(t: ScheduledTrip, k: number, until: number) {
-    const stop = this.city.busStops[t.pattern.stops[k]!.stop]!;
+    const stop = t.pattern.stops[k]!;
     if (!this.traffic.isLaneFree(stop.lane, stop.s, PLACE_ROOM)) return;
     const trip = this.create(t, k + 1, 'dwell', t.pattern.stops[k]!.segIdx);
     trip.dwellUntil = until;

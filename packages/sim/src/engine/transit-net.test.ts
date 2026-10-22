@@ -89,10 +89,8 @@ describe('GTFS patterns over the road graph', () => {
         expect(st.at, `${p.index}`).toBeGreaterThan(prevAt);
         expect(st.timeIdx).toBeGreaterThan(prevIdx);
         expect(district.transit.stops[raw.stops[st.timeIdx]!]!.id).toBe(city.busStops[st.stop]!.id);
-        const stop = city.busStops[st.stop]!;
-        expect(city.lanes[stop.lane]!.seg).toBe(p.segs[st.segIdx]);
-        expect(st.s).toBe(stop.s);
-        expect(dist(patternPoint(city, p, st.at), city.lanes[stop.lane]!.line.points[0]!)).toBeLessThanOrEqual(stop.s + 1);
+        expect(city.lanes[st.lane]!.seg).toBe(p.segs[st.segIdx]);
+        expect(dist(patternPoint(city, p, st.at), city.lanes[st.lane]!.line.points[0]!)).toBeLessThanOrEqual(st.s + 1);
         prevAt = st.at;
         prevIdx = st.timeIdx;
       }
@@ -104,11 +102,11 @@ describe('GTFS patterns over the road graph', () => {
   it('leaves every stop on a lane that drives on to the next one', () => {
     for (const p of net.patterns) {
       const legs: { from: number; seg0: number; seg1: number; to: number }[] = [];
-      if (p.entryLane >= 0) legs.push({ from: p.entryLane, seg0: 0, seg1: p.stops[0]!.segIdx, to: city.busStops[p.stops[0]!.stop]!.lane });
+      if (p.entryLane >= 0) legs.push({ from: p.entryLane, seg0: 0, seg1: p.stops[0]!.segIdx, to: p.stops[0]!.lane });
       p.stops.forEach((st, k) => {
         expect(city.lanes[st.departLane]!.seg).toBe(p.segs[st.segIdx]);
         const next = p.stops[k + 1];
-        if (next) legs.push({ from: st.departLane, seg0: st.segIdx, seg1: next.segIdx, to: city.busStops[next.stop]!.lane });
+        if (next) legs.push({ from: st.departLane, seg0: st.segIdx, seg1: next.segIdx, to: next.lane });
         else if (p.exitSeg >= 0) legs.push({ from: st.departLane, seg0: st.segIdx, seg1: p.segs.length - 1, to: -1 });
       });
       for (const leg of legs) {
@@ -117,6 +115,49 @@ describe('GTFS patterns over the road graph', () => {
         expect(chooseLanes(city, chain, leg.from, leg.to, laneIndexesFor(city, chain, 0, 'any')), `${p.index}`).not.toBeNull();
       }
     }
+  });
+
+  const isTram = (p: { line: number }) => city.busLines[p.line]!.mode === 'tram';
+
+  it('lays nearly every tram pattern over the tracks through all of its stops', () => {
+    const railBound = (i: number) => !!city.busStops[stopIndex.get(district.transit.stops[i]!.id) ?? -1]?.rail;
+    const candidates = district.transit.patterns
+      .map((p, index) => ({ index, tram: district.transit.lines[p.line]!.mode === 'tram', bound: p.stops.filter(railBound).length }))
+      .filter((c) => c.tram && c.bound >= 2);
+    expect(candidates.length).toBeGreaterThanOrEqual(15);
+    const full = candidates.filter((c) => net.patterns.find((p) => p.index === c.index)?.stops.length === c.bound);
+    // Trips that loop outside the frame with no stop out there (Kalemegdan – Savski trg, the Tašmajdan turn)
+    // end at the last stop the tracks inside reach.
+    expect(full.length / candidates.length).toBeGreaterThanOrEqual(0.85);
+  });
+
+  it('keeps trams on the tracks and road vehicles off them', () => {
+    for (const p of net.patterns) {
+      for (const seg of p.segs) expect(!!city.segments[seg]!.rail, `${p.index}`).toBe(isTram(p));
+      for (const st of p.stops) {
+        const stop = city.busStops[st.stop]!;
+        expect(st.lane).toBe(isTram(p) ? stop.rail!.lane : stop.lane);
+        expect(st.s).toBe(isTram(p) ? stop.rail!.s : stop.s);
+      }
+    }
+  });
+
+  it('follows the GTFS shape of the tram lines closely', () => {
+    const trams = net.patterns.filter(isTram);
+    let good = 0;
+    for (const p of trams) {
+      const shape = shapeOf(district.transit.patterns[p.index]!.shape);
+      const from = p.entryLane >= 0 ? 0 : p.stops[0]!.at;
+      const to = p.exitSeg >= 0 ? p.length : p.stops[p.stops.length - 1]!.at;
+      let near = 0;
+      let all = 0;
+      for (let at = from; at <= to; at += 10) {
+        all++;
+        if (offShape(patternPoint(city, p, at), shape) < 20) near++;
+      }
+      if (all === 0 || near / all >= 0.9) good++;
+    }
+    expect(good / trams.length).toBeGreaterThanOrEqual(0.85);
   });
 
   it('leaves the timetable alone when a stop is skipped', () => {

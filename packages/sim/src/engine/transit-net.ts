@@ -1,5 +1,5 @@
 import type { DistrictProfile, DistrictTransit, TransitMode } from '../city/district.js';
-import type { City, Lane, Segment } from '../city/types.js';
+import type { BusStop, City, CurbRef, Lane, Segment } from '../city/types.js';
 import { dist, poseAlong, type Vec2 } from '../geometry.js';
 import { segmentDistance } from '../import/polygons.js';
 import { chooseLanes, laneIndexesFor, routeSegments, type SegmentCost } from './routing.js';
@@ -12,6 +12,8 @@ export interface NetStop {
   timeIdx: number;
   /** Index into NetPattern.segs. */
   segIdx: number;
+  /** Where this pattern's vehicles stop: the kerb, or the track for a tram. */
+  lane: number;
   s: number;
   /** Metres from the start of the route. */
   at: number;
@@ -88,21 +90,26 @@ export function buildTransitNet(city: City, transit: DistrictTransit): TransitNe
   const stopIndex = new Map(city.busStops.map((s, i) => [s.id, i]));
   const lineIndex = new Map(city.busLines.map((l, i) => [l.id, i]));
   const mids = segmentMids(city);
-  const entries = city.segments.filter((s) => !s.rail && city.nodes[s.from]!.boundary);
-  const exits = city.segments.filter((s) => !s.rail && city.nodes[s.to]!.boundary);
+  // Trams come and go on the tracks, road vehicles on the streets.
+  const entries = (rail: boolean) => city.segments.filter((s) => !!s.rail === rail && city.nodes[s.from]!.boundary);
+  const exits = (rail: boolean) => city.segments.filter((s) => !!s.rail === rail && city.nodes[s.to]!.boundary);
   const net: TransitNet = { patterns: [], byLine: new Map() };
 
   transit.patterns.forEach((raw, index) => {
-    if (transit.lines[raw.line]!.mode === 'tram') return;
+    const rail = transit.lines[raw.line]!.mode === 'tram';
+    const place = (stop: BusStop): CurbRef | null => (rail ? (stop.rail ?? null) : stop);
     const shape: Vec2[] = [];
     for (let i = 0; i < raw.shape.length; i += 2) shape.push({ x: raw.shape[i]!, z: raw.shape[i + 1]! });
     const near = nearShape(mids, shape);
     const cost = (seg: { id: number; length: number; speed: number }) => (near.has(seg.id) ? 0 : (OFF_SHAPE_PENALTY * seg.length) / seg.speed);
-    const bound = raw.stops.map((i, timeIdx) => ({ timeIdx, stop: stopIndex.get(transit.stops[i]!.id) ?? -1 })).filter((b) => b.stop >= 0);
+    const bound = raw.stops
+      .map((i, timeIdx) => ({ timeIdx, stop: stopIndex.get(transit.stops[i]!.id) ?? -1 }))
+      .filter((b) => b.stop >= 0 && place(city.busStops[b.stop]!))
+      .map((b) => ({ ...b, at: place(city.busStops[b.stop]!)! }));
     if (!bound.length) return;
 
-    const entrySeg = raw.enter && shape.length >= 2 ? frameSeg(city, entries, shape, false) : null;
-    const exit = raw.exit && shape.length >= 2 ? frameSeg(city, exits, shape, true) : null;
+    const entrySeg = raw.enter && shape.length >= 2 ? frameSeg(city, entries(rail), shape, false) : null;
+    const exit = raw.exit && shape.length >= 2 ? frameSeg(city, exits(rail), shape, true) : null;
     let laid = layPattern(city, bound, entrySeg ? curbOf(city, entrySeg.id).id : -1, exit?.id ?? -1, cost);
     if (entrySeg && (laid?.stops.length ?? 0) < bound.length) {
       // An entry road that leads only into a dead end loses to starting at the first stop.
@@ -143,7 +150,7 @@ export function buildTransitNet(city: City, transit: DistrictTransit): TransitNe
  * A stop that cannot be reached is skipped; a stop nothing can be reached from (a ramp, a turning
  * loop) is dropped when the next one is reachable without it. Null when no stop is reached.
  */
-function layPattern(city: City, bound: { timeIdx: number; stop: number }[], entryCurb: number, exitSeg: number, cost: SegmentCost) {
+function layPattern(city: City, bound: { timeIdx: number; stop: number; at: CurbRef }[], entryCurb: number, exitSeg: number, cost: SegmentCost) {
   const segs: number[] = [];
   const stops: Omit<NetStop, 'at'>[] = [];
   /** Where legs start: the entry (stop -1) or a stop kept, with the length of segs before its own leg. */
@@ -172,9 +179,9 @@ function layPattern(city: City, bound: { timeIdx: number; stop: number }[], entr
   if (entryCurb >= 0) anchors.push({ lane: entryCurb, s: 0, segsBefore: 0, stop: -1 });
 
   for (const b of bound) {
-    const stop = city.busStops[b.stop]!;
+    const stop = b.at;
     const add = () => {
-      stops.push({ stop: b.stop, timeIdx: b.timeIdx, segIdx: segs.length - 1, s: stop.s, departLane: stop.lane });
+      stops.push({ stop: b.stop, timeIdx: b.timeIdx, segIdx: segs.length - 1, lane: stop.lane, s: stop.s, departLane: stop.lane });
     };
     if (!anchors.length) {
       segs.push(city.lanes[stop.lane]!.seg);

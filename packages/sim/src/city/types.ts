@@ -232,6 +232,8 @@ export interface BusStop extends CurbRef {
   heading: number;
   /** Ids of the lines calling here. */
   lines: string[];
+  /** Where trams stop, on their track (also lane and s when no bus calls here). */
+  rail?: CurbRef;
 }
 
 export interface BusLine {
