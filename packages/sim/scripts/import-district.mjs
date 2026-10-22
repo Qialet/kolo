@@ -11,9 +11,11 @@ const osmPath = resolve(process.argv[2] ?? `${root}/data/raw/osm/district.json`)
 const outPath = resolve(process.argv[3] ?? `${root}/data/districts/belgrade-center.json`);
 const gtfsDir = resolve(process.argv[4] ?? `${root}/data/raw/gtfs/feed`);
 
-if (!existsSync(gtfsDir)) throw new Error(`GTFS folder not found: ${gtfsDir}`);
-const gtfs = {};
-for (const file of readdirSync(gtfsDir)) if (file.endsWith('.txt')) gtfs[file] = readFileSync(join(gtfsDir, file), 'utf8');
+let gtfs;
+if (existsSync(gtfsDir)) {
+  gtfs = {};
+  for (const file of readdirSync(gtfsDir)) if (file.endsWith('.txt')) gtfs[file] = readFileSync(join(gtfsDir, file), 'utf8');
+} else console.warn(`No GTFS folder at ${gtfsDir}: the district gets an empty transit section`);
 
 const osm = JSON.parse(readFileSync(osmPath, 'utf8'));
 const district = buildDistrict(osm.elements, {

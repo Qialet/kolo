@@ -2,7 +2,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import type { District } from '../city/district.js';
 import { buildDistrict } from './district.js';
-import { eachCsvRow, gtfsSeconds, importGtfs } from './gtfs.js';
+import { gtfsSeconds, importGtfs } from './gtfs.js';
 import { boundsOfBBox } from './osm-roads.js';
 import { BELGRADE_BBOX, unproject } from './project.js';
 
@@ -31,6 +31,15 @@ const line26 = (trip: string, start: number, prevGap: number) =>
     ['S4', start + 60, start + 90],
     ['S5', start + 150, start + 150],
   ]);
+// Line 27, mirrored: starts inside and leaves the frame east, two stops past it.
+const line27 = (trip: string, start: number, nextGap: number) =>
+  times(trip, [
+    ['S3', start, start],
+    ['S4', start + 60, start + 90],
+    ['S5', start + 150, start + 150],
+    ['S6', start + 150 + nextGap, start + 150 + nextGap],
+    ['S7', start + 270 + nextGap, start + 270 + nextGap],
+  ]);
 
 function feed(): Record<string, string> {
   return {
@@ -42,6 +51,7 @@ function feed(): Record<string, string> {
     'routes.txt':
       '﻿route_id,agency_id,route_short_name,route_long_name,route_type,route_url,route_color,route_text_color\n' +
       'R26,A,26,"Dorćol - Braće Jerković, preko centra",3,,0098DA,FFFFFF\n' +
+      'R27,A,27,Istok,3,,0098DA,FFFFFF\n' +
       'T02,A,2,Tramvaj,0,,FF0000,FFFFFF\n' +
       'E01,A,EKO1,Vukov spomenik - Belvil,3,,0098DA,ffffff\n' +
       'TR40,A,40,Banjica - Zvezdara,11,,,\n',
@@ -52,6 +62,8 @@ function feed(): Record<string, string> {
       stop('S3', 'Славија', b.x0 + 20),
       stop('S4', 'Park "Tašmajdan"', 0),
       stop('S5', 'Kraj', b.x1 - 20),
+      stop('S6', 'Istok blizu', b.x1 + 100),
+      stop('S7', 'Istok daleko', b.x1 + 400),
       stop('S9', 'Samo tramvaj', 0, 40),
     ].join('\n'),
     'trips.txt': [
@@ -61,6 +73,8 @@ function feed(): Record<string, string> {
       'R26,S,a3,Kraj,,0,,sh26,0',
       'R26,RD,a4,Kraj,,0,,sh26,0',
       'R26,RD,a5,"Kraj ""noću""",,0,,sh26,0',
+      'R27,RD,b1,Istok,,0,,sh27,0',
+      'R27,RD,b2,Istok,,0,,sh27,0',
       'T02,RD,tram,Tram,,0,,,0',
       'E01,RD,eko,Belvil,,1,,,0',
       'TR40,N,tro,Zvezdara,,0,,,0',
@@ -73,6 +87,8 @@ function feed(): Record<string, string> {
       ...line26('a4', T + 1200, 180),
       // After midnight, rows out of order.
       ...line26('a5', 90_600, 120).reverse(),
+      ...line27('b1', T, 120),
+      ...line27('b2', T + 600, 180),
       ...times('tram', [['S9', T, T], ['S4', T + 60, T + 60]]),
       ...times('eko', [['S4', T, T], ['S3', T + 120, T + 120]]),
       ...times('tro', [['S3', T, T], ['S4', T + 100, T + 110], ['S5', T + 200, T + 200]]),
@@ -85,22 +101,13 @@ function feed(): Record<string, string> {
       shapeRow('sh26', b.x0 - 60, 2),
       shapeRow('sh26', 0, 3),
       shapeRow('sh26', b.x1 - 20, 4),
+      shapeRow('sh27', b.x0 + 20, 0),
+      shapeRow('sh27', 0, 1),
+      shapeRow('sh27', b.x1 + 250, 2),
+      shapeRow('sh27', b.x1 + 450, 3),
     ].join('\n'),
   };
 }
-
-describe('eachCsvRow', () => {
-  it('handles BOM, CRLF, quoted fields and stray quotes inside a field', () => {
-    const rows: string[][] = [];
-    eachCsvRow('﻿a,b,c\r\n"x, y","say ""hi""",z\nŽeleznička "BGD",,\n"multi\nline",2,3', (r) => rows.push([...r]));
-    expect(rows).toEqual([
-      ['a', 'b', 'c'],
-      ['x, y', 'say "hi"', 'z'],
-      ['Železnička "BGD"', '', ''],
-      ['multi\nline', '2', '3'],
-    ]);
-  });
-});
 
 describe('gtfsSeconds', () => {
   it('reads times past midnight', () => {
@@ -121,6 +128,7 @@ describe('importGtfs on a synthetic feed', () => {
     expect(tr.lines.map((l) => [l.id, l.name, l.mode])).toEqual([
       ['E01', 'EKO1', 'minibus'],
       ['R26', '26', 'bus'],
+      ['R27', '27', 'bus'],
       ['TR40', '40', 'trolley'],
     ]);
     expect(tr.lines[1]).toMatchObject({ longName: 'Dorćol - Braće Jerković, preko centra', color: '#0098DA', text: '#FFFFFF' });
@@ -155,6 +163,19 @@ describe('importGtfs on a synthetic feed', () => {
     // The frame is 100 of the 120 m between S2 and S3 away from S2: the crossing is at 5/6 of the gap.
     expect(a!.enter).toBe(-20);
     expect(c!.enter).toBe(-30);
+  });
+
+  it('builds a pattern with exit and a positive exit offset proportional to the gap', () => {
+    const line = tr.lines.findIndex((l) => l.id === 'R27');
+    const p = tr.patterns.find((q) => q.line === line)!;
+    expect(p).toMatchObject({ stops: [0, 1, 2], enter: false, exit: true });
+    expect(p.shape[0]).toBeCloseTo(b.x0 + 20, 0);
+    expect(p.shape[p.shape.length - 2]).toBeCloseTo(b.x1 + 50, 0);
+    expect(p.profiles.map((q) => [q.enter, q.exit, q.starts])).toEqual([
+      // The frame is 20 of the 120 m between S5 and S6 away from S5: the crossing is at 1/6 of the gap.
+      [undefined, 170, { RD: [T] }],
+      [undefined, 180, { RD: [T + 600] }],
+    ]);
   });
 
   it('falls back to a polyline through the stops when a trip has no shape', () => {

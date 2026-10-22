@@ -11,6 +11,8 @@ export const dot = (a: Vec2, b: Vec2) => a.x * b.x + a.z * b.z;
 export const cross = (a: Vec2, b: Vec2) => a.x * b.z - a.z * b.x;
 export const len = (a: Vec2) => Math.hypot(a.x, a.z);
 export const dist = (a: Vec2, b: Vec2) => Math.hypot(a.x - b.x, a.z - b.z);
+/** Point at fraction t of the way from a to b. */
+export const lerp = (a: Vec2, b: Vec2, t: number): Vec2 => ({ x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t });
 export const norm = (a: Vec2): Vec2 => {
   const l = len(a) || 1;
   return { x: a.x / l, z: a.z / l };
