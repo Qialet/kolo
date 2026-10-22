@@ -14,9 +14,11 @@ import {
   buildMarkingsGeometry,
   buildPlaygroundGeometry,
   buildRoadGeometry,
+  buildTrackGeometry,
   buildWireGeometry,
   flatPolygon,
   LEVEL,
+  platformOf,
   withWindows,
 } from './city-geometry';
 
@@ -31,6 +33,7 @@ export function CityStatic({ city }: { city: City }) {
       <Trees city={city} />
       <Playgrounds city={city} />
       <Depots city={city} />
+      <Tracks city={city} />
       <BusStops city={city} />
       <TrolleyWires city={city} />
     </group>
@@ -197,6 +200,25 @@ function Depots({ city }: { city: City }) {
   );
 }
 
+/** Tram rails, the ballast bed off the street lanes and tram-only platforms. */
+function Tracks({ city }: { city: City }) {
+  const g = useMemo(() => buildTrackGeometry(city), [city]);
+  return (
+    <group>
+      <mesh geometry={g.ballast} receiveShadow>
+        <meshStandardMaterial vertexColors roughness={1} polygonOffset polygonOffsetFactor={-1} />
+      </mesh>
+      <mesh geometry={g.rails}>
+        <meshStandardMaterial vertexColors roughness={0.45} metalness={0.4} polygonOffset polygonOffsetFactor={-3} />
+      </mesh>
+      <mesh geometry={g.platforms} castShadow receiveShadow>
+        <meshStandardMaterial vertexColors roughness={0.9} />
+      </mesh>
+    </group>
+  );
+}
+
+/** Trolleybus wire pairs and the single tram wire. */
 function TrolleyWires({ city }: { city: City }) {
   const geometry = useMemo(() => buildWireGeometry(city), [city]);
   return (
@@ -213,7 +235,8 @@ function BusStops({ city }: { city: City }) {
       {city.busStops.map((stop) => (
         <group
           key={stop.id}
-          position={[stop.x, LEVEL.ground, stop.z]}
+          // Tram-only stops: the shelter stands on the platform.
+          position={[stop.x, platformOf(city, stop) ? LEVEL.platform : LEVEL.ground, stop.z]}
           rotation-y={stop.heading}
           onClick={(e) => {
             e.stopPropagation();

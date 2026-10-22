@@ -40,8 +40,15 @@ export const palette = {
   busDeep: '#1F4FD1',
   trolley: '#169DBF',
   minibus: '#6E98FF',
-  /** Trolleybus overhead wires and poles. */
+  /** Trams: deep indigo, the darkest of the transit blues. */
+  tram: '#3347B8',
+  /** Overhead wires (trolleybus and tram), poles and the pantograph. */
   wire: '#3B4250',
+  rail: '#7F8898',
+  /** Gravel bed where a track runs on its own, off the street lanes. */
+  ballast: '#CBC6BD',
+  /** Tram platforms: raised islands, lighter than the sidewalk. */
+  platform: '#F1F3F7',
   depot: '#7C5CFF',
   depotLot: '#D9D8EC',
   service: '#FF6B3D',

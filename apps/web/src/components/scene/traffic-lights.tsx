@@ -41,6 +41,8 @@ function approachesOf(city: City): Approach[] {
       const w = city.streets[seg.street]!.laneWidth;
       const lanes = seg.lanes.map((l) => city.lanes[l]!);
       const curb = lanes[lanes.length - 1]!;
+      // A track lying on a street lane obeys that street's light: a pole of its own would stand in the road.
+      if (seg.rail && curb.twins?.some((t) => t.s1 >= curb.length - 1)) continue;
       const inner = lanes[0]!;
       const d = endTangent(curb.line);
       // Pole on the kerb just before the stop line, bar across all lanes of the approach.

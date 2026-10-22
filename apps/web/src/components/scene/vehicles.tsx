@@ -10,12 +10,22 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { frameBuffer, type VehiclePose } from '@/lib/live';
 import { palette } from '@/lib/palette';
 import { useVehicles } from '@/lib/queries';
+import { TramTrails, type TrailPose } from '@/lib/tram-trail';
 import { useUi } from '@/lib/ui-store';
 
 /** Latest interpolated poses by id, shared with overlays (labels, routes, camera follow). */
 export const livePoses = new Map<string, VehiclePose>();
 
-const MAX = { taxi: 64, car: 160, bus: 260, trolley: 60, minibus: 24 };
+const MAX = { taxi: 64, car: 160, bus: 260, trolley: 60, minibus: 24, tram: 80 };
+/** CAF Urbos 3 (frame flag 8) and Tatra KT4: the frame gives the front, sections follow its trail. */
+const TRAM = { long: { length: 33, sections: 5 }, short: { length: 19, sections: 2 } } as const;
+const LONG_TRAM = 8;
+const TRAM_SECTIONS = MAX.tram * TRAM.long.sections;
+/** Section model length; real sections (6.6 and 9.5 m) are scaled to it along z, less the joint. */
+const TRAM_MODEL = 8;
+const TRAM_JOINT = 0.35;
+const trails = new TramTrails();
+const sectionPoses: TrailPose[] = [];
 const HALO_PULSE = 2.4;
 const KIND = Object.fromEntries(VEHICLE_KINDS.map((k, i) => [k, i])) as Record<(typeof VEHICLE_KINDS)[number], number>;
 
@@ -63,7 +73,7 @@ function useGeometries() {
     const tails = mergeGeometries([box(0.42, 0.16, 0.06, -0.58, 0.8, -2.2, 0.03), box(0.42, 0.16, 0.06, 0.58, 0.8, -2.2, 0.03)])!;
     const sign = box(0.78, 0.24, 0.34, 0, 1.62, -0.2, 0.06);
     const halo = new THREE.RingGeometry(3.4, 4.3, 40);
-    const coach = (length: number, height: number, axles: number[], wheel: number): Record<string, THREE.BufferGeometry> => ({
+    const coach = (length: number, height: number, axles: number[], wheel: number): Record<(typeof COACH_PARTS)[number], THREE.BufferGeometry> => ({
       Body: box(2.5, height, length - 0.2, 0, 0.35 + height / 2, 0, 0.3),
       Glass: box(2.56, 0.95, length - 0.8, 0, 0.35 + height - 0.8, 0.1, 0.12),
       Roof: box(2.2, 0.16, length * 0.8, 0, 0.35 + height + 0.09, 0, 0.06),
@@ -75,8 +85,29 @@ function useGeometries() {
       trolley: { ...coach(12, 2.5, [-3.9, 3.9], 0.5), Poles: trolleyPoles() },
       minibus: coach(7.5, 2.3, [-2.4, 2.4], 0.42),
     };
-    return { carBody, carCabin, carWheels, tails, sign, halo, transit };
+    const tram = { ...coach(TRAM_MODEL, 2.45, [-2.5, 2.5], 0.36), Panto: pantograph() };
+    return { carBody, carCabin, carWheels, tails, sign, halo, transit, tram };
   }, []);
+}
+
+/** Thin bar between two points of the y–z plane, at x. */
+function bar(x: number, from: { y: number; z: number }, to: { y: number; z: number }, size = 0.07) {
+  const g = new THREE.BoxGeometry(size, size, Math.hypot(to.y - from.y, to.z - from.z));
+  g.rotateX(Math.atan2(to.y - from.y, from.z - to.z));
+  g.translate(x, (from.y + to.y) / 2, (from.z + to.z) / 2);
+  return g;
+}
+
+/** Folding pantograph on a section roof, its collector touching the tram wire 6.0 m above the street. */
+function pantograph() {
+  const roof = { y: 3.0, z: -1.0 };
+  const knee = { y: 4.1, z: 0.7 };
+  const head = { y: (6.0 - 0.2) / 1.15 - 0.04, z: -0.2 };
+  const parts = [-0.3, 0.3].flatMap((x) => [bar(x, roof, knee), bar(x, knee, head)]);
+  const collector = new THREE.BoxGeometry(1.7, 0.06, 0.12);
+  collector.translate(0, head.y, head.z);
+  parts.push(collector);
+  return mergeGeometries(parts)!;
 }
 
 /** Two trolley poles from the roof back up to the wires 5.6 m above the street (model space, before the 1.15 upscale). */
@@ -95,7 +126,9 @@ function trolleyPoles() {
 }
 
 type TransitGroup = 'bus' | 'trolley' | 'minibus';
-type Group = 'taxi' | 'car' | TransitGroup;
+type Group = 'taxi' | 'car' | TransitGroup | 'tram';
+/** Tram parts drawn per section; the pantograph and the tail lamps once per tram. */
+const TRAM_SECTION_PARTS = ['tramBody', 'tramGlass', 'tramRoof', 'tramWheels'] as const;
 const TRANSIT: readonly TransitGroup[] = ['bus', 'trolley', 'minibus'];
 const COACH_PARTS = ['Body', 'Glass', 'Roof', 'Wheels', 'Tails'] as const;
 type TransitPart = `${TransitGroup}${(typeof COACH_PARTS)[number] | 'Poles'}`;
@@ -103,6 +136,7 @@ const partsOf = (group: TransitGroup): TransitPart[] => [...COACH_PARTS, ...(gro
 type Part =
   | 'taxiBody' | 'taxiCabin' | 'taxiWheels' | 'taxiTails' | 'taxiSign' | 'taxiHalo'
   | 'carBody' | 'carCabin' | 'carWheels' | 'carTails'
+  | (typeof TRAM_SECTION_PARTS)[number] | 'tramTails' | 'tramPanto'
   | TransitPart;
 const TRANSIT_COLOR: Record<TransitGroup, string> = { bus: palette.bus, trolley: palette.trolley, minibus: palette.minibus };
 
@@ -121,7 +155,8 @@ const setCursor = (value: string) => {
 export function Vehicles() {
   const g = useGeometries();
   const poses = useRef<VehiclePose[]>([]);
-  const ids = useRef<Record<Group, string[]>>({ taxi: [], car: [], bus: [], trolley: [], minibus: [] });
+  // For trams: the tram id of every section instance.
+  const ids = useRef<Record<Group, string[]>>({ taxi: [], car: [], bus: [], trolley: [], minibus: [], tram: [] });
 
   const select = useUi((s) => s.select);
   const hover = useUi((s) => s.hover);
@@ -136,12 +171,36 @@ export function Vehicles() {
     // Roughly constant on screen: larger when zoomed out, never smaller than the car.
     const pulse = (1 + Math.sin(clock.elapsedTime * HALO_PULSE) * 0.08) * Math.max(1, 7 / camera.zoom);
     const n = frameBuffer.sample(performance.now(), poses.current);
-    const counts = { taxi: 0, car: 0, bus: 0, trolley: 0, minibus: 0 };
+    const counts = { taxi: 0, car: 0, bus: 0, trolley: 0, minibus: 0, tram: 0 };
+    let trams = 0;
     const idLists = ids.current;
     livePoses.clear();
     for (let i = 0; i < n; i++) {
       const p = poses.current[i]!;
       livePoses.set(p.id, p);
+      if (p.kind === KIND.TRAM) {
+        const car = (p.flags & LONG_TRAM) !== 0 ? TRAM.long : TRAM.short;
+        trails.feed(p.id, p.x, p.z, p.heading, car.length);
+        if (trams >= MAX.tram) continue;
+        const grow = Math.max(0.01, Math.min(1, p.age / 500)) * 1.15;
+        const sections = trails.sections(p.id, car.length, car.sections, sectionPoses);
+        const along = (car.length / car.sections - TRAM_JOINT) / TRAM_MODEL;
+        sections.forEach((q, j) => {
+          const k = counts.tram++;
+          idLists.tram[k] = p.id;
+          tmp.position.set(q.x, 0.2, q.z);
+          tmp.rotation.set(0, q.heading, 0);
+          // 15% larger across like every vehicle, true length along the track.
+          tmp.scale.set(grow, grow, along);
+          tmp.updateMatrix();
+          for (const part of TRAM_SECTION_PARTS) meshes[part]?.setMatrixAt(k, tmp.matrix);
+          if (j === Math.floor(car.sections / 2)) meshes.tramPanto?.setMatrixAt(trams, tmp.matrix);
+          if (j === car.sections - 1) meshes.tramTails?.setMatrixAt(trams, tmp.matrix);
+        });
+        meshes.tramTails?.setColorAt(trams, (p.flags & 1) !== 0 ? TAIL_ON : TAIL_OFF);
+        trams++;
+        continue;
+      }
       const group: Group =
         p.kind === KIND.TAXI ? 'taxi' : p.kind === KIND.BUS ? 'bus' : p.kind === KIND.TROLLEY ? 'trolley' : p.kind === KIND.MINIBUS ? 'minibus' : 'car';
       const k = counts[group];
@@ -192,6 +251,10 @@ export function Vehicles() {
     apply('taxi', ['taxiBody', 'taxiCabin', 'taxiWheels', 'taxiTails', 'taxiSign'] as const);
     apply('car', ['carBody', 'carCabin', 'carWheels', 'carTails'] as const);
     for (const group of TRANSIT) apply(group, partsOf(group));
+    apply('tram', TRAM_SECTION_PARTS);
+    counts.tram = trams;
+    apply('tram', ['tramPanto', 'tramTails'] as const);
+    trails.prune();
     const halo = meshes.taxiHalo;
     if (halo) {
       halo.count = halos;
@@ -229,6 +292,7 @@ export function Vehicles() {
       busTails: withColors(MAX.bus, '#7A2530'),
       trolleyTails: withColors(MAX.trolley, '#7A2530'),
       minibusTails: withColors(MAX.minibus, '#7A2530'),
+      tramTails: withColors(MAX.tram, '#7A2530'),
     }),
     [],
   );
@@ -295,6 +359,26 @@ export function Vehicles() {
           )}
         </group>
       ))}
+
+      {/* Trams: deep indigo sections on the track, a pantograph up to the tram wire; any section selects the tram. */}
+      <instancedMesh ref={bind('tramBody')} args={[g.tram.Body, undefined, TRAM_SECTIONS]} castShadow frustumCulled={false} {...handlers('tram')}>
+        <meshStandardMaterial color={palette.tram} roughness={0.4} />
+      </instancedMesh>
+      <instancedMesh ref={bind('tramGlass')} args={[g.tram.Glass, undefined, TRAM_SECTIONS]} frustumCulled={false} {...handlers('tram')}>
+        <meshStandardMaterial color="#1B2A4A" roughness={0.2} metalness={0.3} />
+      </instancedMesh>
+      <instancedMesh ref={bind('tramRoof')} args={[g.tram.Roof, undefined, TRAM_SECTIONS]} frustumCulled={false} {...handlers('tram')}>
+        <meshStandardMaterial color="#F4F7FF" roughness={0.6} />
+      </instancedMesh>
+      <instancedMesh ref={bind('tramWheels')} args={[g.tram.Wheels, undefined, TRAM_SECTIONS]} frustumCulled={false}>
+        <meshStandardMaterial color="#20232A" roughness={0.8} />
+      </instancedMesh>
+      <instancedMesh ref={bind('tramTails')} args={[g.tram.Tails, undefined, MAX.tram]} frustumCulled={false} instanceColor={c.tramTails}>
+        <meshBasicMaterial toneMapped={false} />
+      </instancedMesh>
+      <instancedMesh ref={bind('tramPanto')} args={[g.tram.Panto, undefined, MAX.tram]} frustumCulled={false}>
+        <meshStandardMaterial color={palette.wire} roughness={0.7} />
+      </instancedMesh>
     </group>
   );
 }

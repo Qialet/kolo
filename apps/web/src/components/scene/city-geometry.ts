@@ -6,7 +6,7 @@ import { palette } from '@/lib/palette';
 const tmpColor = new THREE.Color();
 
 /** Ground levels: vehicles drive at y = 0, everything flat sits a little below or above. */
-export const LEVEL = { ground: -0.12, road: 0, marking: 0.02, depotLot: 0.005, depotLines: 0.025 } as const;
+export const LEVEL = { ground: -0.12, road: 0, ballast: 0.008, marking: 0.02, rail: 0.03, depotLot: 0.005, depotLines: 0.025, platform: 0.18 } as const;
 const AREA_LEVEL: Record<AreaKind, number> = {
   parking: -0.11,
   plaza: -0.105,
@@ -143,6 +143,9 @@ function ribbon(points: Vec2[], left: number, right: number, y: number, color: s
 }
 
 const laneWidth = (city: City, lane: Lane) => city.streets[city.segments[lane.seg]!.street]!.laneWidth;
+const isRail = (city: City, lane: number) => !!city.segments[city.lanes[lane]!.seg]!.rail;
+/** Street segments among a node's legs (tram tracks left out). */
+const roadLegs = (city: City, segs: number[]) => segs.filter((s) => !city.segments[s]!.rail);
 
 /** Lane edge points at its start (atEnd = false) or end, shifted half a lane to each side. */
 function laneEnds(city: City, lane: Lane, atEnd: boolean): Vec2[] {
@@ -191,9 +194,10 @@ export function buildRoadGeometry(city: City) {
   }
   for (const node of city.nodes) {
     if (node.radius <= 0) continue;
+    // Tracks cross the junction on their own; a track-only junction gets no asphalt.
     const pts: Vec2[] = [];
-    for (const s of node.in) for (const l of city.segments[s]!.lanes) pts.push(...laneEnds(city, city.lanes[l]!, true));
-    for (const s of node.out) for (const l of city.segments[s]!.lanes) pts.push(...laneEnds(city, city.lanes[l]!, false));
+    for (const s of roadLegs(city, node.in)) for (const l of city.segments[s]!.lanes) pts.push(...laneEnds(city, city.lanes[l]!, true));
+    for (const s of roadLegs(city, node.out)) for (const l of city.segments[s]!.lanes) pts.push(...laneEnds(city, city.lanes[l]!, false));
     const hull = convexHull(pts);
     if (hull.length >= 3) parts.push(flatPolygon(hull, [], LEVEL.road + 0.001, palette.asphalt));
   }
@@ -212,14 +216,14 @@ function dashes(parts: THREE.BufferGeometry[], lane: Lane, lateral: number, dash
 export function buildMarkingsGeometry(city: City) {
   const parts: THREE.BufferGeometry[] = [];
   for (const seg of city.segments) {
-    if (seg.layer < 0) continue;
+    if (seg.layer < 0 || seg.rail) continue;
     const lanes = seg.lanes.map((l) => city.lanes[l]!);
     const w = laneWidth(city, lanes[0]!);
     // Centre line once per two-way pair, on the left edge of the inner lane.
     if (seg.reverse > seg.id) dashes(parts, lanes[0]!, -w / 2, 3, 4);
     for (let i = 0; i + 1 < lanes.length; i++) dashes(parts, lanes[i]!, w / 2, 3, 6);
     const to = city.nodes[seg.to]!;
-    if (!to.signal && !to.boundary && to.in.length + to.out.length > 2) {
+    if (!to.signal && !to.boundary && roadLegs(city, to.in).length + roadLegs(city, to.out).length > 2) {
       for (const lane of lanes) {
         const p = poseAlong(lane.line, lane.length - 0.25);
         parts.push(quad(w, 0.45, p.x, LEVEL.marking + 0.001, p.z, palette.marking, p.heading));
@@ -228,10 +232,12 @@ export function buildMarkingsGeometry(city: City) {
   }
   // Zebra stripes just inside the junction on every leg of every real crossing.
   for (const node of city.nodes) {
-    if (node.boundary || node.radius <= 0 || node.in.length + node.out.length < 3) continue;
-    // Roundabouts have no zebras on the ring itself.
-    if ([...node.in, ...node.out].some((s) => city.segments[s]!.rank >= 10)) continue;
-    const legs = [...node.in.map((s) => ({ s, end: true })), ...node.out.map((s) => ({ s, end: false }))];
+    const ins = roadLegs(city, node.in);
+    const outs = roadLegs(city, node.out);
+    if (node.boundary || node.radius <= 0 || ins.length + outs.length < 3) continue;
+    // Roundabouts have no zebras on the ring itself (tracks rank above rings and do not count).
+    if ([...ins, ...outs].some((s) => city.segments[s]!.rank >= 10)) continue;
+    const legs = [...ins.map((s) => ({ s, end: true })), ...outs.map((s) => ({ s, end: false }))];
     for (const { s, end } of legs) {
       for (const l of city.segments[s]!.lanes) {
         const lane = city.lanes[l]!;
@@ -421,7 +427,10 @@ export function withWindows(material: THREE.MeshStandardMaterial) {
   return material;
 }
 
-/** Overhead trolleybus wires: a pair of lines 5.6 m up over the curb lanes of wired streets and the turns between them. */
+/**
+ * Overhead wires: trolleybus pairs 5.6 m up over the curb lanes of wired streets and the turns
+ * between them, and a single tram wire 6.0 m up over every track and its junction curves.
+ */
 export function buildWireGeometry(city: City): THREE.BufferGeometry {
   const pos: number[] = [];
   const curbOf = (seg: number) => {
@@ -429,24 +438,104 @@ export function buildWireGeometry(city: City): THREE.BufferGeometry {
     return s.lanes[s.lanes.length - 1]!;
   };
   const wired = new Set(city.segments.filter((s) => s.trolley).map((s) => curbOf(s.id)));
-  const string = (line: Lane['line']) => {
-    for (const side of [-WIRE_SPREAD, WIRE_SPREAD]) {
+  const string = (line: Lane['line'], sides: readonly number[], height: number) => {
+    for (const side of sides) {
       let prev = poseAlong(line, 0, side);
       for (let s = WIRE_STEP; s < line.length + WIRE_STEP; s += WIRE_STEP) {
         const p = poseAlong(line, Math.min(s, line.length), side);
-        pos.push(prev.x, WIRE_HEIGHT, prev.z, p.x, WIRE_HEIGHT, p.z);
+        pos.push(prev.x, height, prev.z, p.x, height, p.z);
         prev = p;
       }
     }
   };
-  for (const id of wired) string(city.lanes[id]!.line);
-  for (const c of city.connectors) if (wired.has(c.from) && wired.has(c.to)) string(c.line);
+  for (const id of wired) string(city.lanes[id]!.line, TROLLEY_SIDES, WIRE_HEIGHT);
+  for (const c of city.connectors) if (wired.has(c.from) && wired.has(c.to)) string(c.line, TROLLEY_SIDES, WIRE_HEIGHT);
+  for (const lane of railLanes(city)) string(lane.line, [0], TRAM_WIRE_HEIGHT);
+  for (const c of railConnectors(city)) string(c.line, [0], TRAM_WIRE_HEIGHT);
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   return g;
 }
 
 const WIRE_HEIGHT = 5.6;
-/** Half the distance between the two wires of a pair. */
-const WIRE_SPREAD = 0.3;
+const TRAM_WIRE_HEIGHT = 6.0;
+/** The two wires of a trolleybus pair, 0.3 m to either side of the lane centre. */
+const TROLLEY_SIDES = [-0.3, 0.3] as const;
 const WIRE_STEP = 4;
+
+/** Track lanes at street level and above (tunnels run under the blocks). */
+const railLanes = (city: City) => city.lanes.filter((l) => city.segments[l.seg]!.rail && city.segments[l.seg]!.layer >= 0);
+const railConnectors = (city: City) => city.connectors.filter((c) => isRail(city, c.from) && city.segments[city.lanes[c.from]!.seg]!.layer >= 0);
+
+/** Stretches of a lane not lying on a street lane (outside its twins). */
+function ownSpans(lane: Lane): [number, number][] {
+  const shared = (lane.twins ?? []).map((t) => [t.s0, t.s1] as const).sort((a, b) => a[0] - b[0]);
+  const out: [number, number][] = [];
+  let at = 0;
+  for (const [s0, s1] of shared) {
+    if (s0 > at) out.push([at, s0]);
+    at = Math.max(at, s1);
+  }
+  if (at < lane.length) out.push([at, lane.length]);
+  return out.filter(([a, b]) => b - a > 0.5);
+}
+
+/** Lane shares its first / last metre with a street lane. */
+const sharedAt = (lane: Lane, s: number) => (lane.twins ?? []).some((t) => t.s0 <= s + 1 && t.s1 >= s - 1);
+
+/** Points of a polyline between a and b, every 2 m. */
+function slice(line: Lane['line'], a: number, b: number): Vec2[] {
+  const pts: Vec2[] = [];
+  for (let s = a; s < b; s += 2) pts.push(poseAlong(line, s));
+  pts.push(poseAlong(line, b));
+  return pts;
+}
+
+/** Half the gauge (1.0 m between the rails) and the width of a rail head. */
+const GAUGE_HALF = 0.5;
+const RAIL_WIDTH = 0.08;
+const BALLAST_HALF = 1.3;
+const PLATFORM = { width: 2.2, length: 30, height: 0.3, lateral: 2.6 } as const;
+
+/** A tram stopped at s has its front there: the platform runs back from it. */
+export const platformOf = (city: City, stop: City['busStops'][number]) => {
+  if (!stop.rail || stop.lane !== stop.rail.lane) return null;
+  const lane = city.lanes[stop.rail.lane]!;
+  return poseAlong(lane.line, Math.max(PLATFORM.length / 2, stop.rail.s - PLATFORM.length / 2), PLATFORM.lateral);
+};
+
+/**
+ * Tram tracks: two rails along every track lane and junction curve, a ballast bed where the
+ * track runs on its own (not on a street lane) and a platform at stops served only by trams.
+ */
+export function buildTrackGeometry(city: City) {
+  const rails: THREE.BufferGeometry[] = [];
+  const ballast: THREE.BufferGeometry[] = [];
+  const platforms: THREE.BufferGeometry[] = [];
+  const lay = (points: Vec2[]) => {
+    for (const g of [
+      ribbon(points, -GAUGE_HALF, GAUGE_HALF + RAIL_WIDTH, LEVEL.rail, palette.rail),
+      ribbon(points, GAUGE_HALF + RAIL_WIDTH, -GAUGE_HALF, LEVEL.rail, palette.rail),
+    ])
+      if (g) rails.push(g);
+  };
+  const bed = (points: Vec2[]) => {
+    const g = ribbon(points, BALLAST_HALF, BALLAST_HALF, LEVEL.ballast, palette.ballast);
+    if (g) ballast.push(g);
+  };
+  for (const lane of railLanes(city)) {
+    lay(lane.line.points);
+    for (const [a, b] of ownSpans(lane)) bed(slice(lane.line, a, b));
+  }
+  for (const c of railConnectors(city)) {
+    lay(c.line.points);
+    const from = city.lanes[c.from]!;
+    const to = city.lanes[c.to]!;
+    if (!sharedAt(from, from.length) && !sharedAt(to, 0)) bed(c.line.points);
+  }
+  for (const stop of city.busStops) {
+    const p = platformOf(city, stop);
+    if (p) platforms.push(part(PLATFORM.width, PLATFORM.height, PLATFORM.length, palette.platform, p.x, LEVEL.ground, p.z, p.heading));
+  }
+  return { rails: merge(rails), ballast: merge(ballast), platforms: merge(platforms) };
+}
