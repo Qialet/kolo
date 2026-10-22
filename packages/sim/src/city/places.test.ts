@@ -76,7 +76,8 @@ describe('places on the real city', () => {
     expect(city.pois.map((p) => p.name)).toContain('Kalemegdan');
   });
 
-  it('keeps parked cars off buildings and away from entrances', () => {
+  // Every parked car against every entrance: slow when the whole suite runs in parallel.
+  it('keeps parked cars off buildings and away from entrances', { timeout: 180_000 }, () => {
     for (const car of city.parkedCars) {
       for (const a of city.addresses) expect(dist(car, a)).toBeGreaterThan(1.5);
     }

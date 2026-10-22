@@ -7,7 +7,7 @@ import type { City } from '@kolo/sim';
 import { useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { palette } from '@/lib/palette';
-import { useBus, useOrder, useTaxi } from '@/lib/queries';
+import { useBus, useLine, useOrder, useTaxi } from '@/lib/queries';
 import { useUi } from '@/lib/ui-store';
 import { extrudeBuilding, flatPolygon } from './city-geometry';
 import { livePoses } from './vehicles';
@@ -23,6 +23,7 @@ export function Overlays({ city }: { city: City }) {
       {selection?.kind === 'car' && <VehicleRing id={selection.id} color={palette.pole} />}
       {selection?.kind === 'building' && <BuildingOutline city={city} id={selection.id} />}
       {selection?.kind === 'stop' && <StopRing city={city} id={selection.id} />}
+      {selection?.kind === 'line' && <LineRoutes id={selection.id} />}
       {selection?.kind === 'depot' && <DepotOutline city={city} id={selection.id} />}
     </group>
   );
@@ -89,6 +90,23 @@ function LiveRoute({ vehicleId, points, color, dashed }: { vehicleId: string; po
     <group>
       <Line points={vecs} color="#FFFFFF" lineWidth={9} transparent opacity={0.85} depthTest={false} renderOrder={10} />
       <Line ref={line as never} points={vecs} color={color} lineWidth={4.5} dashed={dashed} dashSize={5} gapSize={3.5} depthTest={false} renderOrder={11} />
+    </group>
+  );
+}
+
+/** Both directions of a line in its colour, over the buildings like a navigator route. */
+function LineRoutes({ id }: { id: string }) {
+  const { data } = useLine(id);
+  const routes = useMemo(() => data?.directions.map((d) => d.route.map((p) => new THREE.Vector3(p.x, 0.45, p.z))).filter((r) => r.length > 1) ?? [], [data]);
+  if (!data) return null;
+  return (
+    <group>
+      {routes.map((pts, i) => (
+        <group key={i}>
+          <Line points={pts} color="#FFFFFF" lineWidth={11} transparent opacity={0.9} depthTest={false} renderOrder={10} />
+          <Line points={pts} color={data.color} lineWidth={6} depthTest={false} renderOrder={11} />
+        </group>
+      ))}
     </group>
   );
 }

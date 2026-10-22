@@ -2,16 +2,16 @@
 
 ## Потоки данных
 - Сервер (apps/api) владеет живой симуляцией: SimulationService строит город из файла района (env DISTRICT_FILE или data/districts/belgrade-center.json выше cwd) и крутит шаг 50 мс.
-- Каждые 100 мс шлюз LiveGateway рассылает кадр (позиции машин, фазы светофоров) в namespace socket.io «/live».
+- Каждые 100 мс шлюз LiveGateway рассылает кадр (позиции машин, фазы светофоров, часы симуляции clock) в namespace socket.io «/live».
 - Раз в секунду рассылается KPI; бизнес-события (заказы, поломки, смены статусов) идут сразу как события ленты и обновления заказов.
 - Клиент (apps/web) строит тот же город локально из того же файла района, поэтому по сети ходят только динамические данные.
 - При подключении сервер шлёт hello (id и версия района); при расхождении с версией вкладки клиент предлагает перезагрузку.
-- Детали выбранного объекта (маршрут такси, светофор, автобус) клиент опрашивает по REST раз в секунду через TanStack Query.
+- Детали выбранного объекта (маршрут такси, светофор, автобус) клиент опрашивает по REST раз в секунду через TanStack Query; остановку — раз в 5 с, линию — раз в 10 с.
 
 ## Данные реального города
 - Сырьё (выгрузка Overpass, GTFS data.gov.rs) лежит в data/raw вне git; скачивание — только с разрешения пользователя.
 - Импорт: packages/sim/src/import (подпуть @kolo/sim/import, в веб не попадает), CLI packages/sim/scripts/import-district.mjs после сборки sim пишет data/districts/belgrade-center.json.
-- Файл района: meta (опорная точка, рамка, дата снимка OSM, хэш версии FNV-1a) и roads (узлы, рёбра с полосами и тегами, запреты поворотов); типы — packages/sim/src/city/district.ts.
+- Файл района: meta (опорная точка, рамка, дата снимка OSM, версия GTFS, хэш версии FNV-1a), roads (узлы, рёбра с полосами и тегами, запреты поворотов) и transit (календарь, остановки, линии, варианты с shape, профили времён и отправления по сервисам); типы — packages/sim/src/city/district.ts.
 - Файл района также несёт здания, площади, деревья, адреса, POI (у площадных — контур) и площадки депо (импорт osm-places.ts, список депо DEPOT_SITES).
 - buildCityFromDistrict превращает файл в City (граф, места, дворы депо) примерно за 0,3 с.
 - Web: scripts/sync-districts.mjs перед dev и build копирует файлы в public/districts/<id>.<version>.json и пишет manifest.json (папка вне git); lib/city грузит manifest без кэша, файл — из кэша браузера.
@@ -33,7 +33,7 @@
 
 ## Модули API (NestJS 12, ESM)
 - DatabaseModule (глобальный): DatabaseService с единственным клиентом Prisma и SeedService.
-- SimulationModule: SimulationService, LiveGateway, SimulationController (/api/sim: состояние, управление, детали такси, автобусов и светофоров, режим светофора).
+- SimulationModule: SimulationService, LiveGateway, SimulationController (/api/sim: состояние, управление и синхронизация часов, детали такси, автобусов, остановок, линий и светофоров, режим светофора).
 - FleetModule: /api/fleet/parks, /api/fleet/vehicles, смена статуса машины, история статусов.
 - OrdersModule: /api/orders (список, деталь с событиями и возражениями, создание, отмена, ручное назначение, возражения и их решение).
 - Валидация тела и query — zod-схемы из packages/contracts через ZodPipe.
@@ -44,7 +44,7 @@
 - Здания — экструзия контуров, слитая в один меш; выбор — по индексу треугольника; выделение — контур здания.
 - Подписи над 3D — обычный DOM-слой (SceneLabels и WorldLabel), позиции проецирует LabelProjector раз в кадр. drei Html не используется: в dev он ломает рендер.
 - Машины — instanced-меши; интерполяция кадров в FrameBuffer (lib/live) с задержкой 140 мс; позы делятся через livePoses.
-- Состояние UI — zustand (lib/ui-store), живые данные — zustand (lib/live), серверные данные — TanStack Query (lib/queries).
+- Состояние UI — zustand (lib/ui-store), живые данные — zustand (lib/live), серверные данные — TanStack Query (lib/queries); часы Белграда и тип дня — lib/belgrade из кадра.
 - Включён React Compiler: не обращаться к ref в render, не мутировать значения хуков (камеру брать из state в useFrame). Проверка — pnpm lint.
 
 ## Запуск и порты
@@ -53,6 +53,6 @@
 - Переменные: apps/api/.env (DATABASE_URL, PORT, WEB_ORIGIN), фронт — NEXT_PUBLIC_API_URL (по умолчанию localhost:4000/api).
 
 ## Тесты
-- packages/sim: импорт и полигоны, граф района, адреса, POI и депо, светофоры, 15-минутный прогон симуляции и 10 минут фонового трафика, сервисный цикл такси.
-- apps/api: unit (ZodPipe, даты, поиск файла района) и e2e (health, парки с координатами, версия района) — e2e требует локальный Postgres.
+- packages/sim: импорт (OSM и GTFS) и полигоны, календарь и праздники, граф района, адреса, POI, депо и остановки, сеть вариантов, расписание транспорта, светофоры, 15-минутный прогон симуляции и 10 минут фонового трафика, сервисный цикл такси.
+- apps/api: unit (ZodPipe, даты, поиск файла района) и e2e (health, парки с координатами, версия района, остановка и линия, синхронизация) — e2e требует локальный Postgres.
 - Визуальная проверка: скриншоты через playwright-core и системный Chrome; в dev доступны window.__koloUi и window.__koloFrames.

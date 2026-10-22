@@ -2,8 +2,8 @@
 
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { FleetStatus, LightMode } from '@kolo/contracts';
-import { BusFrontIcon, CarFrontIcon, CarTaxiFrontIcon, CrosshairIcon, NavigationIcon, TrafficConeIcon, XIcon } from 'lucide-react';
-import { useEffect, useRef, type ReactNode } from 'react';
+import { CarFrontIcon, CarTaxiFrontIcon, CrosshairIcon, NavigationIcon, TrafficConeIcon, XIcon } from 'lucide-react';
+import { useEffect, useRef, type CSSProperties, type ReactNode } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
@@ -14,11 +14,12 @@ import { api } from '@/lib/api';
 import { getCity } from '@/lib/city';
 import { frameBuffer } from '@/lib/live';
 import { ACTIVITY_LABEL, activityTone, FLEET_LABEL, fleetTone, ORDER_LABEL, orderTone, palette } from '@/lib/palette';
-import { keys, useBus, useLight, useTaxi } from '@/lib/queries';
+import { keys, useLight, useTaxi } from '@/lib/queries';
 import { useUi, type Selection } from '@/lib/ui-store';
 import { cn } from '@/lib/utils';
 import { fmtDuration, fmtMeters, fmtRsd, Row, StatusBadge } from './common';
-import { BuildingInspector, DepotInspector, StopInspector } from './inspector-places';
+import { BuildingInspector, DepotInspector } from './inspector-places';
+import { BusInspector, LineInspector, StopInspector } from './inspector-transit';
 import { OrderInspector } from './order-inspector';
 
 export function Inspector() {
@@ -47,6 +48,8 @@ function InspectorBody({ selection }: { selection: Selection }) {
       return <BuildingInspector id={selection.id} />;
     case 'stop':
       return <StopInspector id={selection.id} />;
+    case 'line':
+      return <LineInspector id={selection.id} />;
     case 'order':
       return <OrderInspector id={selection.id} />;
   }
@@ -55,6 +58,7 @@ function InspectorBody({ selection }: { selection: Selection }) {
 export function InspectorHeader({
   icon,
   iconClass,
+  iconStyle,
   eyebrow,
   title,
   subtitle,
@@ -62,6 +66,7 @@ export function InspectorHeader({
 }: {
   icon: ReactNode;
   iconClass: string;
+  iconStyle?: CSSProperties;
   eyebrow: string;
   title: ReactNode;
   subtitle?: ReactNode;
@@ -70,7 +75,9 @@ export function InspectorHeader({
   const select = useUi((s) => s.select);
   return (
     <div className="flex items-start gap-3 p-4 pb-3">
-      <div className={cn('grid size-11 shrink-0 place-items-center rounded-xl', iconClass)}>{icon}</div>
+      <div className={cn('grid size-11 shrink-0 place-items-center rounded-xl', iconClass)} style={iconStyle}>
+        {icon}
+      </div>
       <div className="min-w-0 flex-1">
         <div className="text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">{eyebrow}</div>
         <div className="truncate text-[17px] leading-tight font-bold">{title}</div>
@@ -100,7 +107,7 @@ export function Section({ title, children, aside }: { title: string; children: R
   );
 }
 
-function InspectorSkeleton() {
+export function InspectorSkeleton() {
   return (
     <div className="flex flex-col gap-3 p-4">
       <Skeleton className="h-11 w-2/3" />
@@ -378,37 +385,7 @@ function GreenStepper({ label, value, onChange }: { label: string; value: number
   );
 }
 
-// ───────────────────────────── bus & car ─────────────────────────────
-
-function BusInspector({ id }: { id: string }) {
-  const { data } = useBus(id);
-  const focus = useUi((s) => s.focus);
-  if (!data) return <InspectorSkeleton />;
-  return (
-    <>
-      <InspectorHeader
-        icon={<BusFrontIcon className="size-5" />}
-        iconClass="bg-bus text-white"
-        eyebrow={`Автобус · линия ${data.lineName}`}
-        title={data.headsign}
-        subtitle={`${data.speedKmh} км/ч · ${data.passengers} пассажиров`}
-        onFocus={() => {
-          const p = frameBuffer.find(id);
-          if (p) focus(p[2], p[3], { zoom: 8, follow: id });
-        }}
-      />
-      <Section title="Следующая остановка">
-        <div className="rounded-xl bg-bus/8 p-3">
-          <div className="text-[14px] font-semibold">{data.nextStop}</div>
-          <div className="mt-1 text-[12px] text-muted-foreground">
-            {data.dwellLeftSec > 0 ? `Посадка пассажиров · отправление через ${data.dwellLeftSec} с` : `Прибытие ≈ ${fmtDuration(data.etaSec)}`}
-          </div>
-        </div>
-        <p className="mt-2 text-[11px] text-muted-foreground">Автобусы останавливаются в кобальтовых карманах; рядом с остановками чаще всего заказывают такси.</p>
-      </Section>
-    </>
-  );
-}
+// ───────────────────────────── car ─────────────────────────────
 
 function CarInspector({ id }: { id: string }) {
   const focus = useUi((s) => s.focus);

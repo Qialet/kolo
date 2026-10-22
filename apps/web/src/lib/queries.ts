@@ -6,6 +6,8 @@ import { api } from './api';
 export const keys = {
   taxi: (id: string) => ['taxi', id] as const,
   bus: (id: string) => ['bus', id] as const,
+  stop: (id: string) => ['stop', id] as const,
+  line: (id: string) => ['line', id] as const,
   light: (id: number) => ['light', id] as const,
   parks: ['parks'] as const,
   vehicles: ['vehicles'] as const,
@@ -20,6 +22,12 @@ export const useTaxi = (id: string | null) =>
 
 export const useBus = (id: string | null) =>
   useQuery({ queryKey: keys.bus(id ?? ''), queryFn: () => api.bus(id!), enabled: !!id, refetchInterval: 1000 });
+
+export const useStop = (id: string | null) =>
+  useQuery({ queryKey: keys.stop(id ?? ''), queryFn: () => api.stop(id!), enabled: !!id, refetchInterval: 5000 });
+
+export const useLine = (id: string | null) =>
+  useQuery({ queryKey: keys.line(id ?? ''), queryFn: () => api.line(id!), enabled: !!id, refetchInterval: 10000 });
 
 export const useLight = (id: number | null) =>
   useQuery({ queryKey: keys.light(id ?? -1), queryFn: () => api.light(id!), enabled: id !== null, refetchInterval: 1000 });

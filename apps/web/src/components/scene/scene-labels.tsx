@@ -1,6 +1,6 @@
 'use client';
 
-import { LIGHT_ASPECTS, type PlaceRef } from '@kolo/contracts';
+import { LIGHT_ASPECTS, type PlaceRef, type VehicleKind } from '@kolo/contracts';
 import { useEffect, useMemo, useRef } from 'react';
 import { getCity } from '@/lib/city';
 import { frameBuffer } from '@/lib/live';
@@ -81,9 +81,11 @@ function OrderLabels({ id }: { id: string }) {
   );
 }
 
+const TRANSIT_LABEL: Partial<Record<VehicleKind, string>> = { BUS: 'Автобус', TROLLEY: 'Троллейбус', MINIBUS: 'Минибус' };
+
 function BusLabel({ id }: { id: string }) {
   const { data } = useBus(id);
-  return <Tag anchor={{ follow: id, y: 6 }} title={`Автобус ${data?.lineName ?? ''}`} status={data ? `→ ${data.nextStop}` : undefined} />;
+  return <Tag anchor={{ follow: id, y: 6 }} title={`${TRANSIT_LABEL[data?.kind ?? 'BUS'] ?? 'Автобус'} ${data?.lineName ?? ''}`} status={data ? `→ ${data.nextStop}` : undefined} />;
 }
 
 function HoverPlate({ id }: { id: string }) {

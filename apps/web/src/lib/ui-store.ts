@@ -10,6 +10,7 @@ export type Selection =
   | { kind: 'building'; id: string }
   | { kind: 'depot'; id: string }
   | { kind: 'stop'; id: string }
+  | { kind: 'line'; id: string }
   | { kind: 'order'; id: string };
 
 export interface CameraRequest {

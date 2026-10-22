@@ -1012,7 +1012,8 @@ export class Simulation {
       textColor: line.textColor,
       headsign: trip.pattern.headsign,
       speedKmh: Math.round(v.speed * 36) / 10,
-      nextStop: next ? this.city.busStops[next.stop]!.name : '—',
+      // Standing at the last stop: name the terminus.
+      nextStop: next ? this.city.busStops[next.stop]!.name : trip.phase === 'dwell' ? this.city.busStops[trip.pattern.stops[trip.next - 1]!.stop]!.name : '—',
       nextStopAt,
       etaSec: nextStopAt === null ? 0 : Math.max(0, Math.round((nextStopAt - clock) / 1000)),
       delaySec: trip.delaySec,
@@ -1033,8 +1034,10 @@ export class Simulation {
       const active = this.transit.trips.get(t.key);
       // Under way by the timetable but not on the map: missed or already gone.
       if (!active && t.spawnAt <= clock) continue;
+      const last = t.pattern.exitSeg < 0 ? t.pattern.stops.length - 1 : -1;
       t.pattern.stops.forEach((st, k) => {
-        if (st.stop !== index || (active && active.next > k)) return;
+        // Trips ending here only arrive: nothing to board.
+        if (st.stop !== index || k === last || (active && active.next > k)) return;
         const scheduledAt = this.transit.departureAt(t, k);
         const expectedAt = scheduledAt + (active ? active.delaySec * 1000 : 0);
         if (expectedAt < clock || expectedAt > clock + HOUR) return;

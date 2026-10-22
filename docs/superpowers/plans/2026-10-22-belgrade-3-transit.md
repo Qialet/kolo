@@ -80,4 +80,4 @@
 **Файлы:** console/top-bar.tsx, inspector.tsx, inspector-places.tsx, command-search.tsx, lib/queries.ts, ui-store.ts (Selection line), scene/overlays.tsx; docs SIMULATION, ARCHITECTURE, DOMAIN, DESIGN, ROADMAP.
 - Часы — время Белграда из кадра и тип дня (будний, суббота, воскресенье, праздник с именем); при |clock − wall| больше 30 с и скорости не выше ×1 — кнопка «Синхронизировать».
 - Инспектор остановки — ближайшие отправления («через N мин», опоздание); инспектор линии — направления, остановки по порядку, интервал, следующий рейс, трасса цветом линии; инспектор автобуса — «по расписанию» или «опаздывает на N мин»; поиск по линиям.
-- [ ] Скриншоты инспекторов; обновить доки и ROADMAP (этапы 1 и 4); коммит feat(web): Belgrade clock, sync and transit inspectors.
+- [x] Скриншоты инспекторов; обновить доки и ROADMAP (этапы 1 и 4); коммит feat(web): Belgrade clock, sync and transit inspectors.

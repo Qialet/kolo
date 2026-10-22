@@ -1,5 +1,7 @@
 import type {
   BusDetail,
+  LineDetail,
+  StopDetail,
   CreateOrderInput,
   DisputeDto,
   FleetStatus,
@@ -46,6 +48,8 @@ export const api = {
   simControl: (input: SimControlInput) => post<SimState>('/sim/control', input),
   taxi: (id: string) => request<TaxiDetail>(`/sim/taxis/${id}`),
   bus: (id: string) => request<BusDetail>(`/sim/buses/${id}`),
+  stop: (id: string) => request<StopDetail>(`/sim/stops/${id}`),
+  line: (id: string) => request<LineDetail>(`/sim/lines/${id}`),
   light: (id: number) => request<LightDetail>(`/sim/lights/${id}`),
   setLight: (id: number, input: LightControlInput) => patch<LightDetail>(`/sim/lights/${id}`, input),
   events: () => request<LiveEvent[]>('/sim/events'),

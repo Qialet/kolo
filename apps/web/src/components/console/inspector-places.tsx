@@ -1,7 +1,6 @@
 'use client';
 
-import { Building2Icon, BusIcon, MapPinIcon, WarehouseIcon } from 'lucide-react';
-import { useMemo } from 'react';
+import { Building2Icon, MapPinIcon, WarehouseIcon } from 'lucide-react';
 import type { Vec2 } from '@kolo/sim';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
@@ -139,41 +138,6 @@ export function BuildingInspector({ id }: { id: string }) {
           </Section>
         </>
       )}
-    </>
-  );
-}
-
-export function StopInspector({ id }: { id: string }) {
-  const city = getCity();
-  const stop = city.busStops.find((s) => s.id === id)!;
-  const focus = useUi((s) => s.focus);
-  const openCreate = useUi((s) => s.openCreateOrder);
-  const lines = useMemo(() => city.busLines.filter((l) => stop.lines.includes(l.id)), [city, stop]);
-  return (
-    <>
-      <InspectorHeader
-        icon={<BusIcon className="size-5" />}
-        iconClass="bg-bus text-white"
-        eyebrow="Остановка ГСП"
-        title={stop.name}
-        subtitle={`Линии: ${lines.map((l) => l.name).join(', ')}`}
-        onFocus={() => focus(stop.x, stop.z, { zoom: 9 })}
-      />
-      <Section title="Маршруты">
-        {lines.map((l) => (
-          <Row key={l.id} label={<StatusBadge tone="bus">{l.name}</StatusBadge>}>
-            {l.longName}
-          </Row>
-        ))}
-      </Section>
-      <Separator />
-      <Section title="Спрос">
-        <p className="mb-2 text-[12px] text-muted-foreground">Около 40% заказов в районе создаётся у остановок — свободные такси дежурят неподалёку.</p>
-        <Button size="sm" className="w-full" onClick={() => openCreate({ pickupId: stop.id })}>
-          <MapPinIcon data-icon="inline-start" />
-          Заказ от остановки
-        </Button>
-      </Section>
     </>
   );
 }

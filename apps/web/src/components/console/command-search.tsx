@@ -1,6 +1,6 @@
 'use client';
 
-import { BusIcon, CarTaxiFrontIcon, MapPinIcon, ReceiptTextIcon, WarehouseIcon } from 'lucide-react';
+import { BusIcon, CarTaxiFrontIcon, MapPinIcon, ReceiptTextIcon, RouteIcon, WarehouseIcon } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { CommandDialog, Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { getCity } from '@/lib/city';
@@ -12,7 +12,7 @@ import { useUi } from '@/lib/ui-store';
 /** Rows per group: thousands of real addresses would make the palette sluggish. */
 const LIMIT = 50;
 
-/** Ctrl/⌘+K palette: taxis, live orders, depots, stops and addresses. */
+/** Ctrl/⌘+K palette: taxis, live orders, depots, transit lines, stops and addresses. */
 export function CommandSearch({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
   const vehicles = useVehicles();
   const orders = useLive((s) => s.orders);
@@ -25,6 +25,7 @@ export function CommandSearch({ open, onOpenChange }: { open: boolean; onOpenCha
   const liveOrders = searchItems(Object.values(orders), query, (o) => `${o.code} ${o.pickup.label} ${o.dropoff.label} ${o.passengerName}`, LIMIT);
   const depots = searchItems(city.depots, query, (d) => `${d.name} ${d.id} парк`, LIMIT);
   const stops = searchItems(city.busStops, query, (s) => `остановка ${s.name}`, LIMIT);
+  const lines = searchItems(city.busLines, query, (l) => `линия ${l.name} ${l.longName}`, LIMIT);
   const addresses = searchItems(sorted, query, (a) => a.label, LIMIT);
 
   useEffect(() => {
@@ -44,9 +45,9 @@ export function CommandSearch({ open, onOpenChange }: { open: boolean; onOpenCha
   };
 
   return (
-    <CommandDialog open={open} onOpenChange={onOpenChange} title="Поиск" description="Такси, заказы, парки, адреса">
+    <CommandDialog open={open} onOpenChange={onOpenChange} title="Поиск" description="Такси, заказы, парки, линии, остановки, адреса">
       <Command shouldFilter={false}>
-        <CommandInput placeholder="Номер такси, водитель, код заказа, адрес…" value={query} onValueChange={setQuery} />
+        <CommandInput placeholder="Номер такси, водитель, код заказа, линия, адрес…" value={query} onValueChange={setQuery} />
         <CommandList className="max-h-[420px]">
           <CommandEmpty>Ничего не найдено</CommandEmpty>
           <CommandGroup heading="Такси">
@@ -85,6 +86,29 @@ export function CommandSearch({ open, onOpenChange }: { open: boolean; onOpenCha
               </CommandItem>
             ))}
           </CommandGroup>
+          {lines.length > 0 && (
+            <CommandGroup heading="Линии">
+              {lines.map((l) => (
+                <CommandItem
+                  key={l.id}
+                  value={`линия ${l.name} ${l.longName}`}
+                  onSelect={() =>
+                    go(() => {
+                      select({ kind: 'line', id: l.id });
+                      const at = city.busStops.filter((s) => s.lines.includes(l.id));
+                      if (at.length) focus(at.reduce((a, s) => a + s.x, 0) / at.length, at.reduce((a, s) => a + s.z, 0) / at.length, { zoom: 3 });
+                    })
+                  }
+                >
+                  <RouteIcon />
+                  <span className="rounded px-1 text-[12px] font-bold" style={{ backgroundColor: l.color, color: l.textColor }}>
+                    {l.name}
+                  </span>
+                  <span className="truncate text-muted-foreground">{l.longName}</span>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          )}
           {stops.length > 0 && (
           <CommandGroup heading="Остановки">
             {stops.map((s) => (

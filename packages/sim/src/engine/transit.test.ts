@@ -37,9 +37,11 @@ describe('timetable transit', () => {
     expect(sim.clock).toBe(WEEKDAY_1530);
     let overlaps = 0;
     let checks = 0;
-    const t0 = performance.now();
+    let ms = 0;
     for (let i = 0; i < 600 * 20; i++) {
+      const t0 = performance.now();
       sim.step(0.05);
+      ms += performance.now() - t0;
       if (i % 100 !== 0) continue;
       const byLane = new Map<number, { s: number; len: number }[]>();
       for (const v of sim.traffic.vehicles) {
@@ -58,7 +60,6 @@ describe('timetable transit', () => {
         }
       }
     }
-    const ms = performance.now() - t0;
     expect(sim.clock).toBe(WEEKDAY_1530 + 600_000);
     expect(transitVehicles(sim).length).toBeGreaterThanOrEqual(100);
     const { servedStops, missedStops } = sim.transit.stats;
@@ -200,6 +201,37 @@ describe('transit details for the console', () => {
     }
     expect(d.departures.some((x) => x.vehicleId)).toBe(true);
     expect(sim.stopDetail('nope')).toBeNull();
+  });
+
+  it('lists only trips that leave a terminus, not those ending there', () => {
+    let checked = 0;
+    for (const stop of city.busStops) {
+      const d = sim.stopDetail(stop.id)!;
+      for (const dep of d.departures) {
+        if (!dep.vehicleId) continue;
+        const trip = sim.transit.byVehicle.get(dep.vehicleId)!;
+        const k = trip.pattern.stops.findIndex((st) => city.busStops[st.stop]!.id === stop.id);
+        expect(k < trip.pattern.stops.length - 1 || trip.pattern.exitSeg >= 0, `${stop.name} ${dep.vehicleId}`).toBe(true);
+        checked++;
+      }
+    }
+    expect(checked).toBeGreaterThan(20);
+  });
+
+  it('names the terminus of a bus standing at its last stop', () => {
+    const run = new Simulation(city, fleet(2), { startAt: WEEKDAY_1530 });
+    let found = false;
+    for (let i = 0; i < 120 * 20 && !found; i++) {
+      run.step(0.05);
+      if (i % 20) continue;
+      const trip = [...run.transit.trips.values()].find((t) => t.phase === 'dwell' && t.next >= t.pattern.stops.length);
+      if (!trip) continue;
+      const d = run.busDetail(trip.id)!;
+      expect(d.nextStop).toBe(city.busStops[trip.pattern.stops[trip.pattern.stops.length - 1]!.stop]!.name);
+      expect(d.nextStopAt).toBeNull();
+      found = true;
+    }
+    expect(found).toBe(true);
   });
 
   it('describes a line by direction', () => {

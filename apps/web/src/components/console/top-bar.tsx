@@ -1,8 +1,8 @@
 'use client';
 
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { BellIcon, ChevronDownIcon, GaugeIcon, PauseIcon, PlayIcon, PlusIcon, SearchIcon, WarehouseIcon } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { BellIcon, ChevronDownIcon, GaugeIcon, PauseIcon, PlayIcon, PlusIcon, RefreshCwIcon, SearchIcon, WarehouseIcon } from 'lucide-react';
+import { useState } from 'react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import {
@@ -21,6 +21,7 @@ import { Separator } from '@/components/ui/separator';
 import { Slider } from '@/components/ui/slider';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { api } from '@/lib/api';
+import { dayLabel, fmtClock, useSimClock } from '@/lib/belgrade';
 import { getCity } from '@/lib/city';
 import { useLive } from '@/lib/live';
 import { keys, useParks, useSimState } from '@/lib/queries';
@@ -196,26 +197,36 @@ function LeverSlider({ label, value, max, format, onCommit }: { label: string; v
   );
 }
 
+/** Ahead of (or behind) real time by more than this: offer to sync the timetable clock. */
+const DRIFT_MS = 30_000;
+
 function LiveClock() {
   const connected = useLive((s) => s.connected);
-  const [now, setNow] = useState<Date | null>(null);
-  useEffect(() => {
-    const tick = () => setNow(new Date());
-    const first = setTimeout(tick, 0);
-    const id = setInterval(tick, 1000);
-    return () => {
-      clearTimeout(first);
-      clearInterval(id);
-    };
-  }, []);
+  const speed = useLive((s) => s.kpi?.speed ?? 1);
+  const { clock, wall } = useSimClock();
+  const qc = useQueryClient();
+  const sync = useMutation({
+    mutationFn: () => api.simControl({ sync: true }),
+    onSuccess: (data) => qc.setQueryData(keys.simState, data),
+  });
+  const drift = clock !== null && Math.abs(clock - wall) > DRIFT_MS && speed <= 1;
   return (
-    <div
-      className={cn('flex h-9 items-center gap-2 rounded-xl px-3 text-[13px] font-semibold whitespace-nowrap max-sm:px-2.5', connected ? 'bg-pickup/12 text-pickup' : 'bg-destructive/10 text-destructive')}
-      title={connected ? 'Live' : 'Нет связи'}
-    >
-      <span className={cn('size-2 rounded-full', connected ? 'animate-pulse bg-pickup' : 'bg-destructive')} />
-      <span className="max-sm:hidden">{connected ? 'Live' : 'Нет связи'}</span>
-      <span className="tabular text-foreground/80 max-lg:hidden">{now?.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) ?? '--:--'}</span>
+    <div className="flex items-center gap-1.5">
+      <div
+        className={cn('flex h-9 items-center gap-2 rounded-xl px-3 text-[13px] font-semibold whitespace-nowrap max-sm:px-2.5', connected ? 'bg-pickup/12 text-pickup' : 'bg-destructive/10 text-destructive')}
+        title={clock !== null ? `Время Белграда в симуляции · ${dayLabel(clock)}` : connected ? 'Live' : 'Нет связи'}
+      >
+        <span className={cn('size-2 rounded-full', connected ? 'animate-pulse bg-pickup' : 'bg-destructive')} />
+        <span className="max-sm:hidden">{connected ? 'Live' : 'Нет связи'}</span>
+        <span className="tabular text-foreground/80 max-lg:hidden">{clock !== null ? fmtClock(clock) : '--:--'}</span>
+        {clock !== null && <span className="text-[11px] font-medium text-foreground/60 max-xl:hidden">{dayLabel(clock)}</span>}
+      </div>
+      {drift && (
+        <Button variant="outline" className="h-9 rounded-xl" onClick={() => sync.mutate()} disabled={sync.isPending} title="Вернуть часы симуляции к реальному времени; автобусы встанут по расписанию">
+          <RefreshCwIcon data-icon="inline-start" />
+          <span className="max-md:hidden">Синхронизировать</span>
+        </Button>
+      )}
     </div>
   );
 }
