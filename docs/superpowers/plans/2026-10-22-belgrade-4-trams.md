@@ -78,4 +78,4 @@
 ### Задача 8: UI и документация
 **Файлы:** console/inspector-transit.tsx, command-search.tsx; docs SIMULATION, ARCHITECTURE, DOMAIN, DESIGN, ROADMAP.
 - Инспектор: «Трамвай 2 → Pristanište», тип вагона (CAF Urbos 3 или Tatra KT4); линия — «трамвайная линия»; поиск находит трамвайные линии.
-- [ ] Скриншоты инспекторов; доки (общая полоса, рельсовые сегменты, ранг 20, хвосты) и ROADMAP (трамваи, известные упрощения); коммит feat(web): tram inspectors and docs.
+- [x] Скриншоты инспекторов; доки (общая полоса, рельсовые сегменты, ранг 20, хвосты) и ROADMAP (трамваи, известные упрощения); коммит feat(web): tram inspectors and docs.

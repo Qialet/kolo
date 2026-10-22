@@ -1,12 +1,12 @@
 'use client';
 
-import { BusIcon, CarTaxiFrontIcon, MapPinIcon, ReceiptTextIcon, RouteIcon, WarehouseIcon } from 'lucide-react';
+import { BusIcon, CarTaxiFrontIcon, MapPinIcon, ReceiptTextIcon, RouteIcon, TramFrontIcon, WarehouseIcon } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { CommandDialog, Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { getCity } from '@/lib/city';
 import { frameBuffer, useLive } from '@/lib/live';
 import { useVehicles } from '@/lib/queries';
-import { searchItems } from '@/lib/search';
+import { lineSearchText, searchItems } from '@/lib/search';
 import { useUi } from '@/lib/ui-store';
 
 /** Rows per group: thousands of real addresses would make the palette sluggish. */
@@ -25,7 +25,7 @@ export function CommandSearch({ open, onOpenChange }: { open: boolean; onOpenCha
   const liveOrders = searchItems(Object.values(orders), query, (o) => `${o.code} ${o.pickup.label} ${o.dropoff.label} ${o.passengerName}`, LIMIT);
   const depots = searchItems(city.depots, query, (d) => `${d.name} ${d.id} парк`, LIMIT);
   const stops = searchItems(city.busStops, query, (s) => `остановка ${s.name}`, LIMIT);
-  const lines = searchItems(city.busLines, query, (l) => `линия ${l.name} ${l.longName}`, LIMIT);
+  const lines = searchItems(city.busLines, query, lineSearchText, LIMIT);
   const addresses = searchItems(sorted, query, (a) => a.label, LIMIT);
 
   useEffect(() => {
@@ -91,7 +91,7 @@ export function CommandSearch({ open, onOpenChange }: { open: boolean; onOpenCha
               {lines.map((l) => (
                 <CommandItem
                   key={l.id}
-                  value={`линия ${l.name} ${l.longName}`}
+                  value={lineSearchText(l)}
                   onSelect={() =>
                     go(() => {
                       select({ kind: 'line', id: l.id });
@@ -100,7 +100,7 @@ export function CommandSearch({ open, onOpenChange }: { open: boolean; onOpenCha
                     })
                   }
                 >
-                  <RouteIcon />
+                  {l.mode === 'tram' ? <TramFrontIcon /> : <RouteIcon />}
                   <span className="rounded px-1 text-[12px] font-bold" style={{ backgroundColor: l.color, color: l.textColor }}>
                     {l.name}
                   </span>

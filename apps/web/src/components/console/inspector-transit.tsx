@@ -1,7 +1,7 @@
 'use client';
 
 import type { TransitMode, VehicleKind } from '@kolo/contracts';
-import { BusFrontIcon, BusIcon, MapPinIcon, RouteIcon } from 'lucide-react';
+import { BusFrontIcon, BusIcon, MapPinIcon, RouteIcon, TramFrontIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
@@ -15,6 +15,8 @@ import { fmtDuration, StatusBadge } from './common';
 import { InspectorHeader, InspectorSkeleton, Section } from './inspector';
 
 const KIND_LABEL: Record<VehicleKind, string> = { TAXI: 'Такси', CAR: 'Машина', BUS: 'Автобус', TROLLEY: 'Троллейбус', MINIBUS: 'Минибус', TRAM: 'Трамвай' };
+/** Belgrade trams: 33 m CAF Urbos 3 and 19 m Tatra KT4. */
+const tramModel = (length: number) => (length > 25 ? 'CAF Urbos 3' : 'Tatra KT4');
 const MODE_LABEL: Record<TransitMode, string> = { bus: 'Автобусная линия', trolley: 'Троллейбусная линия', minibus: 'Линия минибусов', tram: 'Трамвайная линия' };
 
 /** Line number on its GTFS colours. */
@@ -50,14 +52,15 @@ export function BusInspector({ id }: { id: string }) {
   const { clock } = useSimClock();
   if (!data) return <InspectorSkeleton />;
   const delay = delayInfo(data.delaySec);
+  const tram = data.kind === 'TRAM';
   return (
     <>
       <InspectorHeader
-        icon={<BusFrontIcon className="size-5" />}
+        icon={tram ? <TramFrontIcon className="size-5" /> : <BusFrontIcon className="size-5" />}
         iconClass="text-white"
         iconStyle={{ backgroundColor: data.color, color: data.textColor }}
-        eyebrow={`${KIND_LABEL[data.kind]} · линия ${data.lineName}`}
-        title={`→ ${data.headsign}`}
+        eyebrow={tram ? `${tramModel(data.length)} · ${data.length} м` : `${KIND_LABEL[data.kind]} · линия ${data.lineName}`}
+        title={tram ? `Трамвай ${data.lineName} → ${data.headsign}` : `→ ${data.headsign}`}
         subtitle={`${data.speedKmh} км/ч · ${data.passengers} пассажиров`}
         onFocus={() => focusVehicle(focus, id)}
       />
@@ -91,6 +94,7 @@ export function BusInspector({ id }: { id: string }) {
 
 export function StopInspector({ id }: { id: string }) {
   const stop = getCity().busStops.find((s) => s.id === id)!;
+  const tramOnly = stop.rail?.lane === stop.lane;
   const { data } = useStop(id);
   const { clock } = useSimClock();
   const focus = useUi((s) => s.focus);
@@ -99,9 +103,9 @@ export function StopInspector({ id }: { id: string }) {
   return (
     <>
       <InspectorHeader
-        icon={<BusIcon className="size-5" />}
+        icon={tramOnly ? <TramFrontIcon className="size-5" /> : <BusIcon className="size-5" />}
         iconClass="bg-bus text-white"
-        eyebrow={`Остановка ГСП · № ${stop.code}`}
+        eyebrow={`${tramOnly ? 'Трамвайная остановка' : 'Остановка ГСП'} · № ${stop.code}`}
         title={stop.name}
         subtitle={data ? `${data.lines.length} линий` : undefined}
         onFocus={() => focus(stop.x, stop.z, { zoom: 9 })}
@@ -189,8 +193,9 @@ export function LineInspector({ id }: { id: string }) {
         }}
       />
       <div className="min-h-0 overflow-y-auto">
-        {data.directions.map((dir) => (
-          <Section key={dir.headsign} title={`→ ${dir.headsign}`}>
+        {/* Ring lines (tram 2) have the same headsign both ways: directions are keyed by order. */}
+        {data.directions.map((dir, i) => (
+          <Section key={i} title={`→ ${dir.headsign}`}>
             <div className="mb-2 flex gap-3 text-[12px] text-muted-foreground">
               <span>{dir.headwayMin !== null ? `Интервал ≈ ${dir.headwayMin} мин` : 'Реже раза в час'}</span>
               <span>

@@ -137,6 +137,8 @@ export interface BusDetail {
   color: string;
   textColor: string;
   headsign: string;
+  /** Vehicle length in metres: a 33 m tram is a CAF Urbos 3, a 19 m one a Tatra KT4. */
+  length: number;
   speedKmh: number;
   nextStop: string;
   /** Expected arrival at the next stop (ms since epoch, simulation clock); null after the last one. */

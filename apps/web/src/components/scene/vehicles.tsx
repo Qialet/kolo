@@ -199,6 +199,9 @@ export function Vehicles() {
         });
         meshes.tramTails?.setColorAt(trams, (p.flags & 1) !== 0 ? TAIL_ON : TAIL_OFF);
         trams++;
+        // Overlays (selection ring, label, camera follow) take the middle of the car, not its front.
+        p.x = sections.reduce((a, q) => a + q.x, 0) / sections.length;
+        p.z = sections.reduce((a, q) => a + q.z, 0) / sections.length;
         continue;
       }
       const group: Group =

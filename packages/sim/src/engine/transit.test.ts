@@ -249,6 +249,13 @@ describe('transit details for the console', () => {
     expect(sim.busDetail('nope')).toBeNull();
   });
 
+  it('gives the length of the vehicle, telling a CAF tram from a Tatra', () => {
+    const lengths = trams(sim).map((v) => sim.busDetail(v.id)!.length);
+    expect(new Set(lengths)).toEqual(new Set([19, 33]));
+    const bus = transitVehicles(sim).find((v) => v.kind === 'BUS')!;
+    expect(sim.busDetail(bus.id)!.length).toBe(bus.length);
+  });
+
   it('lists the next departures at a stop', () => {
     const busy = [...city.busStops].sort((a, b) => b.lines.length - a.lines.length)[0]!;
     const d = sim.stopDetail(busy.id)!;

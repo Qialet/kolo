@@ -1009,6 +1009,7 @@ export class Simulation {
       color: line.color,
       textColor: line.textColor,
       headsign: trip.pattern.headsign,
+      length: v.length,
       speedKmh: Math.round(v.speed * 36) / 10,
       // Standing at the last stop: name the terminus.
       nextStop: next ? this.city.busStops[next.stop]!.name : trip.phase === 'dwell' ? this.city.busStops[trip.pattern.stops[trip.next - 1]!.stop]!.name : '—',

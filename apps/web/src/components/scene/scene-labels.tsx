@@ -81,7 +81,7 @@ function OrderLabels({ id }: { id: string }) {
   );
 }
 
-const TRANSIT_LABEL: Partial<Record<VehicleKind, string>> = { BUS: 'Автобус', TROLLEY: 'Троллейбус', MINIBUS: 'Минибус' };
+const TRANSIT_LABEL: Partial<Record<VehicleKind, string>> = { BUS: 'Автобус', TROLLEY: 'Троллейбус', MINIBUS: 'Минибус', TRAM: 'Трамвай' };
 
 function BusLabel({ id }: { id: string }) {
   const { data } = useBus(id);

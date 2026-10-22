@@ -14,3 +14,13 @@ export function searchItems<T>(items: T[], query: string, text: (item: T) => str
   }
   return out;
 }
+
+const MODE_WORDS: Record<string, string> = {
+  bus: 'автобус автобусная',
+  trolley: 'троллейбус троллейбусная',
+  minibus: 'минибус',
+  tram: 'трамвай трамвайная',
+};
+
+/** What a transit line is found by: its number, mode and name. */
+export const lineSearchText = (l: { name: string; longName: string; mode: string }) => `линия ${l.name} ${MODE_WORDS[l.mode] ?? ''} ${l.longName}`;
