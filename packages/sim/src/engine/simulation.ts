@@ -27,9 +27,10 @@ import {
 } from '@kolo/contracts';
 import { lanePoint } from '../city/lanes.js';
 import { stopPickup } from '../city/transit-places.js';
-import type { City, CurbRef, Depot, Slot } from '../city/types.js';
+import type { BusStop, City, CurbRef, Depot, Slot } from '../city/types.js';
 import { dist, type Vec2 } from '../geometry.js';
 import { createRng, type Rng } from '../rng.js';
+import { Demand } from './demand.js';
 import { CANCEL_REASONS_PASSENGER, DISPUTE_REASONS, passengerName } from './names.js';
 import { cycleOf, signalState } from './signals.js';
 import { Roaming } from './roaming.js';
@@ -139,7 +140,6 @@ declare const crypto: { randomUUID(): string };
 
 const MAX_CARS = 300;
 /** Places that free taxis wait at (busier ones only). */
-const HOTSPOT_WEIGHT = 2;
 const BASE_ORDERS_PER_MIN = 3.2;
 const FARE = { start: 230, perKm: 95, perMin: 18 };
 const SUBSTEP = 0.05;
@@ -150,12 +150,12 @@ export class Simulation {
   readonly roaming: Roaming;
   readonly transit: Transit;
   readonly orders = new Map<string, SimOrder>();
+  readonly demandPoints: Demand;
   private readonly rng: Rng;
   private readonly hooks: SimHooks;
   private readonly places = new Map<string, Place>();
+  /** Where free taxis wait for orders. */
   private readonly hotspots: Place[] = [];
-  /** Bus stops that double as pick-up points. */
-  private readonly stopPlaces: Place[] = [];
   private readonly slotUse = new Map<string, (string | null)[]>();
   private readonly boxUse = new Map<string, (string | null)[]>();
   private startAt: number;
@@ -182,15 +182,16 @@ export class Simulation {
     this.startAt = opts.startAt ?? Date.now();
     this.traffic = new TrafficSystem(city);
     for (const a of city.addresses) this.places.set(a.id, { id: a.id, label: a.label, lane: a.lane, s: a.s, x: a.x, z: a.z });
+    const pickupStops: BusStop[] = [];
     for (const st of city.busStops) {
       // Taxis wait short of the shelter, and only where they may drive and stop.
       if (!stopPickup(city, st)) continue;
       const place = { id: st.id, label: `Остановка «${st.name}»`, lane: st.lane, s: Math.max(8, st.s - 20), x: st.x, z: st.z };
       this.places.set(st.id, place);
-      this.stopPlaces.push(place);
+      pickupStops.push(st);
     }
-    for (const poi of city.pois) if (poi.weight >= HOTSPOT_WEIGHT) this.hotspots.push(this.places.get(poi.addressId)!);
-    this.hotspots.push(...this.stopPlaces);
+    this.demandPoints = new Demand(city, pickupStops);
+    for (const spot of this.demandPoints.spots()) this.hotspots.push(this.places.get(spot.id)!);
     for (const d of city.depots) {
       this.slotUse.set(d.id, d.slots.map(() => null));
       this.boxUse.set(d.id, d.boxes.map(() => null));
@@ -554,25 +555,12 @@ export class Simulation {
     return this.places.get(id);
   }
 
-  private pickOrigin(): Place {
-    const r = this.rng.next();
-    if (r < 0.4 && this.stopPlaces.length) return this.rng.pick(this.stopPlaces);
-    if (r < 0.7) {
-      const total = this.city.pois.reduce((a, p) => a + p.weight, 0);
-      let x = this.rng.range(0, total);
-      for (const p of this.city.pois) {
-        x -= p.weight;
-        if (x <= 0) return this.places.get(p.addressId)!;
-      }
-    }
-    return this.places.get(this.rng.pick(this.city.addresses).id)!;
-  }
-
   private spawnRandomOrder() {
-    const pickup = this.pickOrigin();
-    let dropoff = this.places.get(this.rng.pick(this.city.addresses).id)!;
-    for (let i = 0; i < 10 && dist(pickup, dropoff) < 300; i++) dropoff = this.places.get(this.rng.pick(this.city.addresses).id)!;
-    const source: OrderSource = this.stopPlaces.includes(pickup) ? 'BUS_STOP' : this.rng.chance(0.85) ? 'APP' : 'PHONE';
+    const origin = this.demandPoints.origin(this.rng, this.clock);
+    const pickup = this.places.get(origin.id)!;
+    let dropoff = this.places.get(this.demandPoints.destination(this.rng).id)!;
+    for (let i = 0; i < 10 && dist(pickup, dropoff) < 300; i++) dropoff = this.places.get(this.demandPoints.destination(this.rng).id)!;
+    const source: OrderSource = origin.kind === 'stop' ? 'BUS_STOP' : this.rng.chance(0.85) ? 'APP' : 'PHONE';
     this.createOrder({ pickupId: pickup.id, dropoffId: dropoff.id, source });
   }
 

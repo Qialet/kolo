@@ -150,3 +150,37 @@ describe('Simulation', () => {
     expect(frameBytes).toBeLessThan(32 * 1024);
   });
 });
+
+describe('weighted demand', () => {
+  /** Pick-up, drop-off and source of every order created in three minutes. */
+  function orders(seed: number) {
+    const list: string[] = [];
+    const sim = new Simulation(city, fleet(20), {
+      seed,
+      startAt: AFTERNOON,
+      demand: 6,
+      hooks: { onOrderCreated: (o, source) => list.push(`${o.pickup.addressId}>${o.dropoff.addressId}:${source}`) },
+    });
+    for (let i = 0; i < 180 * 20; i++) sim.step(0.05);
+    return { list, sim };
+  }
+
+  it('creates the same orders from the same seed and other orders from another', () => {
+    const a = orders(11);
+    const b = orders(11);
+    expect(a.list.length).toBeGreaterThan(30);
+    expect(b.list).toEqual(a.list);
+    expect(orders(12).list).not.toEqual(a.list);
+    const stopIds = new Set(city.busStops.map((s) => s.id));
+    for (const o of a.list) expect(o.endsWith(':BUS_STOP')).toBe(stopIds.has(o.split('>')[0]!));
+  });
+
+  it('keeps free taxis on duty at the busiest places', () => {
+    const sim = new Simulation(city, fleet(60), { startAt: AFTERNOON });
+    const spots = new Set(sim.demandPoints.spots().map((s) => s.id));
+    for (let i = 0; i < 120 * 20; i++) sim.step(0.05);
+    const free = [...sim.taxis.values()].filter((t) => t.activity === 'FREE' && t.target);
+    expect(free.length).toBeGreaterThan(5);
+    for (const t of free) expect(spots.has(t.target!.id)).toBe(true);
+  });
+});

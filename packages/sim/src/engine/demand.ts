@@ -1,6 +1,7 @@
 import type { DistrictTransit } from '../city/district.js';
-import type { City } from '../city/types.js';
+import type { BusStop, City } from '../city/types.js';
 import { ringArea } from '../import/polygons.js';
+import type { Rng } from '../rng.js';
 import { belgradeTime, serviceFor, type TransitCalendar } from '../transit/calendar.js';
 import { prevDate, serviceEpoch } from './transit.js';
 
@@ -86,4 +87,109 @@ export function hourWeights(calls: Map<string, Float64Array[]>, calendar: Transi
   if (total > 0 || !today) return w;
   for (const hour of today) for (let i = 0; i < n; i++) w[i] = w[i]! + hour[i]!;
   return w;
+}
+
+/** Share of pick-ups at stops, and at stops or places of interest together; the rest are at addresses. */
+const ORIGIN_STOP = 0.4;
+const ORIGIN_POI = 0.7;
+/** Share of drop-offs at places of interest; the rest are at addresses. */
+const DEST_POI = 0.25;
+/** Places where free taxis wait for orders. */
+export const DUTY_SPOTS = 40;
+
+/** A demand point; `id` is the simulation place (stop id, the address of a place of interest, address id), `index` its position in its list. */
+export interface DemandPick {
+  kind: 'stop' | 'poi' | 'address';
+  id: string;
+  index: number;
+}
+
+/**
+ * Where orders start and end: stops by their departures this hour, places of interest by weight,
+ * addresses by floor area. Tables are built once; every pick is a binary search.
+ */
+export class Demand {
+  private readonly calls: Map<string, Float64Array[]>;
+  private readonly poiCum: Float64Array;
+  private readonly addressCum: Float64Array;
+  private readonly hours = new Map<number, { weights: Float64Array; cum: Float64Array }>();
+
+  constructor(
+    private readonly city: City,
+    private readonly stops: readonly BusStop[],
+  ) {
+    this.calls = stopCalls(city.transit, stops.map((s) => s.id));
+    this.poiCum = cumulative(city.pois.map((p) => p.weight));
+    this.addressCum = cumulative(addressWeights(city));
+  }
+
+  get cachedHours(): number {
+    return this.hours.size;
+  }
+
+  /** Departures from each stop in the current hour (by the order of `stops`). */
+  stopWeights(clockMs: number): Float64Array {
+    return this.hour(clockMs).weights;
+  }
+
+  origin(rng: Rng, clockMs: number): DemandPick {
+    const r = rng.next();
+    const u = rng.next();
+    if (r < ORIGIN_STOP) {
+      const i = pickWeighted(this.hour(clockMs).cum, u);
+      if (i >= 0) return { kind: 'stop', id: this.stops[i]!.id, index: i };
+    }
+    if (r < ORIGIN_POI) return this.poi(u);
+    return this.address(u);
+  }
+
+  destination(rng: Rng): DemandPick {
+    const r = rng.next();
+    const u = rng.next();
+    return r < DEST_POI ? this.poi(u) : this.address(u);
+  }
+
+  /** Stops and places of interest with the most pick-ups over a day, most first; one per place. */
+  spots(n = DUTY_SPOTS): DemandPick[] {
+    const daily = new Float64Array(this.stops.length);
+    for (const hours of this.calls.values()) for (const h of hours) for (let i = 0; i < daily.length; i++) daily[i] = daily[i]! + h[i]!;
+    const stopTotal = daily.reduce((s, x) => s + x, 0);
+    const poiTotal = this.poiCum.length ? this.poiCum[this.poiCum.length - 1]! : 0;
+    const all: (DemandPick & { p: number })[] = [];
+    if (stopTotal > 0) this.stops.forEach((s, i) => all.push({ kind: 'stop', id: s.id, index: i, p: (ORIGIN_STOP * daily[i]!) / stopTotal }));
+    if (poiTotal > 0) this.city.pois.forEach((p, i) => all.push({ kind: 'poi', id: p.addressId, index: i, p: ((ORIGIN_POI - ORIGIN_STOP) * p.weight) / poiTotal }));
+    all.sort((a, b) => b.p - a.p || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    const seen = new Set<string>();
+    const out: DemandPick[] = [];
+    for (const { kind, id, index } of all) {
+      if (out.length >= n) break;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      out.push({ kind, id, index });
+    }
+    return out;
+  }
+
+  private poi(u: number): DemandPick {
+    const i = pickWeighted(this.poiCum, u);
+    return i >= 0 ? { kind: 'poi', id: this.city.pois[i]!.addressId, index: i } : this.address(u);
+  }
+
+  private address(u: number): DemandPick {
+    const i = pickWeighted(this.addressCum, u);
+    return { kind: 'address', id: this.city.addresses[i]!.id, index: i };
+  }
+
+  /** Weights of the clock hour: Belgrade is a whole number of hours off UTC, so the UTC hour is the key. */
+  private hour(clockMs: number) {
+    const key = Math.floor(clockMs / 3_600_000);
+    let table = this.hours.get(key);
+    if (!table) {
+      if (this.hours.size >= 48) this.hours.clear();
+      const weights = hourWeights(this.calls, this.city.transit.calendar, clockMs);
+      table = { weights, cum: cumulative(weights) };
+      this.hours.set(key, table);
+    }
+    return table;
+  }
 }
