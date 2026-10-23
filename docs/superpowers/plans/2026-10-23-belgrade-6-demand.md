@@ -52,4 +52,4 @@
 ### Задача 3: доки, проверка, слияние
 **Файлы:** docs/SIMULATION.md, docs/DOMAIN.md, docs/ROADMAP.md.
 - SIMULATION, «Агенты»: дежурство у 40 точек с наибольшим спросом; новый пункт о весах спроса. DOMAIN, «Автоматика»: доли и веса подачи и назначения. ROADMAP: чекбокс «Спрос по весам…» отмечен, «где продолжать» — план 6 влит, дальше 7–9. Каждый файл до 100 строк.
-- [ ] pnpm test, pnpm build, pnpm lint (web) зелёные; коммит docs: weighted demand; слияние в main fast-forward, тесты на main, ветка удалена.
+- [x] pnpm test, pnpm build, pnpm lint (web) зелёные; коммит docs: weighted demand; слияние в main fast-forward, тесты на main, ветка удалена.

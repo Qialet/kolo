@@ -139,7 +139,6 @@ interface SimOrder {
 declare const crypto: { randomUUID(): string };
 
 const MAX_CARS = 300;
-/** Places that free taxis wait at (busier ones only). */
 const BASE_ORDERS_PER_MIN = 3.2;
 const FARE = { start: 230, perKm: 95, perMin: 18 };
 const SUBSTEP = 0.05;
