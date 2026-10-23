@@ -48,7 +48,7 @@ export function serviceEpoch(date: string, sec: number): number {
   return noon + (sec - NOON) * 1000;
 }
 
-function prevDate(date: string): string {
+export function prevDate(date: string): string {
   const d = new Date(Date.UTC(+date.slice(0, 4), +date.slice(4, 6) - 1, +date.slice(6, 8)) - 86_400_000);
   return `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, '0')}${String(d.getUTCDate()).padStart(2, '0')}`;
 }

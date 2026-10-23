@@ -36,10 +36,10 @@
 ### Задача 1: веса и выбор по весам
 **Файлы:** создать packages/sim/src/engine/demand.ts (+ demand.test.ts); изменить engine/transit.ts (экспорт prevDate).
 **Интерфейсы:** cumulative(weights: ArrayLike<number>): Float64Array — накопленные суммы; pickWeighted(cum: Float64Array, u: number): number — первый i с cum[i] > u × сумма, −1 при нулевой сумме; MIN_ADDRESS_AREA = 300; addressWeights(city: City): Float64Array — по индексам city.addresses (ringArea из import/polygons); stopCalls(transit: DistrictTransit, stopIds: string[]): Map<string, Float64Array[]> — по сервису 48 вёдер часа сервиса (секунда отправления / 3600, не больше 47), в каждом счётчик на остановку из stopIds (чужие остановки пропускаются); hourWeights(calls, calendar: TransitCalendar, clockMs: number): Float64Array — date из belgradeTime, час h = (clockMs − serviceEpoch(date, 0)) / 3,6e6 вниз, зажат в 0..23; вес = calls[serviceFor(date)][h] + calls[serviceFor(prevDate(date))][h + 24]; при нулевой сумме — сумма всех вёдер сервиса даты.
-- [ ] Тесты pickWeighted: cumulative([1, 0, 3]) — u 0 и 0,2499 дают 0, 0,25 и 0,9999 дают 2, индекс 1 не выпадает никогда; cumulative([0, 0]) — −1.
-- [ ] Тесты addressWeights на реальном городе: все веса не меньше 300; адрес без здания — ровно 300; два адреса одного здания (площадь × этажи / 2 больше 300) равны и в сумме дают площадь × этажи с точностью 1 м².
-- [ ] Тесты stopCalls и hourWeights на фикстуре: паттерн из двух остановок, профиль t [0, 0, 120, 180], старты RD 3500, 3600 и 90 000 → ведро 0: [1, 0], ведро 1: [1, 2], ведро 25: [1, 1]; календарь «все дни RD», праздник-фикстура → сервис N без рейсов; четверг 00:30 даёт ведро 0 плюс ведро 24 вчерашнего сервиса, 01:30 учитывает рейс 90 000 (ведро 25); час без рейсов → суточная сумма; clockMs в день перехода на летнее время — конечные числа.
-- [ ] Реализация, тесты зелёные; коммит feat(sim): demand weights and weighted picking.
+- [x] Тесты pickWeighted: cumulative([1, 0, 3]) — u 0 и 0,2499 дают 0, 0,25 и 0,9999 дают 2, индекс 1 не выпадает никогда; cumulative([0, 0]) — −1.
+- [x] Тесты addressWeights на реальном городе: все веса не меньше 300; адрес без здания — ровно 300; два адреса одного здания (площадь × этажи / 2 больше 300) равны и в сумме дают площадь × этажи с точностью 1 м².
+- [x] Тесты stopCalls и hourWeights на фикстуре: паттерн из двух остановок, профиль t [0, 0, 120, 180], старты RD 3500, 3600 и 90 000 → ведро 0: [1, 0], ведро 1: [1, 2], ведро 25: [1, 1]; календарь «все дни RD», праздник-фикстура → сервис N без рейсов; четверг 00:30 даёт ведро 0 плюс ведро 24 вчерашнего сервиса, 01:30 учитывает рейс 90 000 (ведро 25); час без рейсов → суточная сумма; clockMs в день перехода на летнее время — конечные числа.
+- [x] Реализация, тесты зелёные; коммит feat(sim): demand weights and weighted picking.
 
 ### Задача 2: Demand в симуляции
 **Файлы:** engine/demand.ts, engine/simulation.ts, engine/simulation.test.ts, src/index.ts (экспорт Demand и типов).
