@@ -4,6 +4,7 @@ import { lanePoint } from '../city/lanes.js';
 import type { City, Connector, CurbRef, Lane, Segment } from '../city/types.js';
 import { dist, dot, polyline, poseAlong, poseAt, type Polyline, type Pose, type Vec2 } from '../geometry.js';
 import type { Rng } from '../rng.js';
+import { yieldsTo } from './priority.js';
 import { chooseLanes, laneIndexesFor, routeSegments, turnBetween } from './routing.js';
 import { cycleOf, isFlashing, signalState, type SignalRuntime, type SignalState } from './signals.js';
 
@@ -55,6 +56,8 @@ export interface Vehicle {
   straightPreference: number;
   odometer: number;
   stoppedFor: number;
+  /** Lane at whose stop sign the vehicle has made its full stop (-1: not yet). */
+  lineStop: number;
   /** Long vehicles: junction curves left behind (odometer when the front left them), held while the body still covers them. */
   tail: { conn: number; at: number }[];
 }
@@ -71,6 +74,9 @@ const LONG_TAIL = 15;
 const IMPATIENCE = 20;
 /** A driver waiting this long at a line they may cross gets the junction: newcomers on crossing paths hold back. */
 const STARVING = 30;
+/** At a stop sign: standing this long, this close to the line, before going on. */
+const STOP_DWELL = 1;
+const STOP_REACH = 4;
 /** A vehicle this close behind another one's tail queues behind it. */
 const QUEUE_BEHIND = 20;
 
@@ -130,6 +136,7 @@ export function makeVehicle(id: string, kind: VehicleKind, rng: Rng, long = fals
     straightPreference: rng.chance(0.55) ? 1 : 0,
     odometer: 0,
     stoppedFor: 0,
+    lineStop: -1,
     tail: [],
   };
 }
@@ -250,6 +257,7 @@ export class TrafficSystem {
     v.pathIdx = 0;
     v.stop = null;
     v.committed = -1;
+    v.lineStop = -1;
     v.tail.length = 0;
     this.updatePose(v);
   }
@@ -508,6 +516,12 @@ export class TrafficSystem {
         if (stopDist < toLine - 1) return false;
       } else if (aspect !== 'GREEN') return false;
     }
+    const mine = city.segments[city.lanes[c.from]!.seg]!;
+    // A stop sign (no light, or a flashing one): a full stop at the line comes before anything else.
+    if (flashing && mine.control === 'stop' && v.lineStop !== c.from) {
+      if (v.speed < 0.3 && toLine < STOP_REACH && v.stoppedFor >= STOP_DWELL) v.lineStop = c.from;
+      else return false;
+    }
     // Something already in (or committed to) a crossing path.
     for (const k of c.conflicts) if (this.connBusy[k]! > 0) return false;
     // Do not block the box: a queue reaching back to the exit.
@@ -519,15 +533,15 @@ export class TrafficSystem {
     // in (crossing paths are still checked above): breaks mutual-yield deadlocks.
     if (v.stoppedFor > IMPATIENCE) return true;
     // Turning across the tracks, even on a green, cars let a tram coming up go first (not one standing at its line).
-    if (this.railIn[node.id] && !city.segments[city.lanes[c.from]!.seg]!.rail) {
+    if (this.railIn[node.id] && !mine.rail) {
       for (const segId of node.in) {
         const seg = city.segments[segId]!;
         if (seg.rail && this.anyApproaching(v, seg.lanes, c, 40, false, true)) return false;
       }
     }
     if (flashing) {
-      const myRank = city.segments[city.lanes[c.from]!.seg]!.rank;
-      if (this.approachingConflict(v, node.in, c, (seg) => seg.rank > myRank, 32)) return false;
+      // Priority signs and ranks, then the car on the right.
+      if (this.approachingConflict(v, node.in, c, (seg) => seg !== mine && yieldsTo(mine, seg), 32)) return false;
       if (c.turn === 'L' && this.approachingOpposite(v, node.in, c, 30)) return false;
     } else if (c.turn === 'L' && this.approachingOpposite(v, node.in, c, 40)) {
       return false;
@@ -646,6 +660,7 @@ export class TrafficSystem {
           v.s -= lane.length;
           v.pathIdx++;
           v.committed = -1;
+          v.lineStop = -1;
         } else {
           v.s = lane.length - 0.01;
           v.speed = 0;
