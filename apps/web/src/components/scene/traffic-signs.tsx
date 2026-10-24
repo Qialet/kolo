@@ -1,6 +1,5 @@
 'use client';
 
-import { useFrame } from '@react-three/fiber';
 import { endTangent, headingOf, poseAlong, type City, type TrafficSign } from '@kolo/sim';
 import { useLayoutEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
@@ -12,6 +11,8 @@ interface Placed {
   /** Pole foot, on the kerb of the approach the sign controls. */
   x: number;
   z: number;
+  /** Facing the traffic it is for. */
+  heading: number;
 }
 
 interface Bar {
@@ -25,18 +26,25 @@ interface Bar {
 const PLATE_Y = 3.6;
 const POLE_H = 3.2;
 
-/** Each sign is an outer plate (border colour) and a smaller inner one in front of it. */
+/**
+ * Each sign is a grey back plate, a border plate on its face and a smaller inner one in front: polygon prisms
+ * (a cylinder with as many sides), so they keep their shape from any side like the light heads.
+ */
 const PLATES: Record<TrafficSign['kind'], { sides: number; start: number; outer: number; inner: number; border: string; face: string }> = {
   // Point down.
-  giveWay: { sides: 3, start: -Math.PI / 2, outer: 1.1, inner: 0.72, border: palette.signRed, face: palette.signWhite },
+  giveWay: { sides: 3, start: 0, outer: 1.1, inner: 0.72, border: palette.signRed, face: palette.signWhite },
   // Flat top.
   stop: { sides: 8, start: Math.PI / 8, outer: 0.84, inner: 0.74, border: palette.signWhite, face: palette.signRed },
   priority: { sides: 4, start: 0, outer: 0.88, inner: 0.6, border: palette.signWhite, face: palette.signYellow },
 };
 const KINDS = Object.keys(PLATES) as TrafficSign['kind'][];
 
+/** Plate layers: distance in front of the pole and thickness. */
+const BACK = { ahead: 0.12, depth: 0.06 };
+const BORDER = { ahead: 0.16, depth: 0.02 };
+const FACE = { ahead: 0.18, depth: 0.02 };
+
 const tmp = new THREE.Object3D();
-const look = new THREE.Vector3();
 
 function placeSigns(city: City): { signs: Placed[]; bars: Bar[] } {
   const signs: Placed[] = [];
@@ -46,14 +54,15 @@ function placeSigns(city: City): { signs: Placed[]; bars: Bar[] } {
     const w = city.streets[seg.street]!.laneWidth;
     const lanes = seg.lanes.map((l) => city.lanes[l]!);
     const curb = lanes[lanes.length - 1]!;
+    const d = endTangent(curb.line);
     // On the kerb just before the stop line.
     const p = poseAlong(curb.line, Math.max(0, curb.length - 2.5), w / 2 + 1.4);
-    signs.push({ kind: sign.kind, x: p.x, z: p.z });
+    signs.push({ kind: sign.kind, x: p.x, z: p.z, heading: headingOf({ x: -d.x, z: -d.z }) });
     if (sign.kind === 'stop') {
       const inner = lanes[0]!;
       const a = poseAlong(inner.line, inner.length - 0.3, -w / 2);
       const b = poseAlong(curb.line, curb.length - 0.3, w / 2);
-      bars.push({ x: (a.x + b.x) / 2, z: (a.z + b.z) / 2, w: Math.hypot(b.x - a.x, b.z - a.z), heading: headingOf(endTangent(curb.line)) });
+      bars.push({ x: (a.x + b.x) / 2, z: (a.z + b.z) / 2, w: Math.hypot(b.x - a.x, b.z - a.z), heading: headingOf(d) });
     }
   }
   return { signs, bars };
@@ -68,8 +77,8 @@ export function TrafficSigns({ city }: { city: City }) {
 
   useLayoutEffect(() => {
     tmp.rotation.set(0, 0, 0);
+    tmp.scale.set(1, 1, 1);
     signs.forEach((s, i) => {
-      tmp.scale.set(1, 1, 1);
       tmp.position.set(s.x, POLE_H / 2, s.z);
       tmp.updateMatrix();
       poles.current?.setMatrixAt(i, tmp.matrix);
@@ -105,53 +114,49 @@ export function TrafficSigns({ city }: { city: City }) {
   );
 }
 
-/**
- * Plates of one kind, turned to the camera: from above an upright plate is mostly seen edge on or from
- * behind, while the pole's place on the kerb already tells which approach the sign is for.
- */
+/** Plates of one kind, upright on their poles and turned to their approach. */
 function SignPlates({ kind, signs }: { kind: TrafficSign['kind']; signs: Placed[] }) {
   const mine = useMemo(() => signs.filter((s) => s.kind === kind), [signs, kind]);
   const plate = PLATES[kind];
-  const outer = useRef<THREE.InstancedMesh>(null);
-  const inner = useRef<THREE.InstancedMesh>(null);
-  /** Camera direction the matrices were last laid out for (NaN: not yet). */
-  const laidFor = useRef({ x: NaN, y: NaN, z: NaN, n: -1 });
+  const back = useRef<THREE.InstancedMesh>(null);
+  const border = useRef<THREE.InstancedMesh>(null);
+  const face = useRef<THREE.InstancedMesh>(null);
 
-  useFrame(({ camera }) => {
-    camera.getWorldDirection(look);
-    const last = laidFor.current;
-    if (Math.abs(look.x - last.x) + Math.abs(look.y - last.y) + Math.abs(look.z - last.z) < 1e-4 && last.n === mine.length) return;
-    laidFor.current = { x: look.x, y: look.y, z: look.z, n: mine.length };
-    const yaw = Math.atan2(-look.x, -look.z);
-    const pitch = Math.asin(Math.min(1, -look.y));
+  useLayoutEffect(() => {
     tmp.scale.set(1, 1, 1);
-    tmp.rotation.set(-pitch, yaw, 0, 'YXZ');
     mine.forEach((s, i) => {
-      for (const [ref, ahead] of [
-        [outer, 0.1],
-        [inner, 0.12],
+      // The prism axis is laid along the heading: X first stands it up, Y turns it.
+      tmp.rotation.set(Math.PI / 2, s.heading, 0, 'YXZ');
+      for (const [ref, layer] of [
+        [back, BACK],
+        [border, BORDER],
+        [face, FACE],
       ] as const) {
-        tmp.position.set(s.x - look.x * ahead, PLATE_Y - look.y * ahead, s.z - look.z * ahead);
+        tmp.position.set(s.x + Math.sin(s.heading) * layer.ahead, PLATE_Y, s.z + Math.cos(s.heading) * layer.ahead);
         tmp.updateMatrix();
         ref.current?.setMatrixAt(i, tmp.matrix);
       }
     });
     tmp.rotation.set(0, 0, 0, 'XYZ');
-    for (const m of [outer, inner]) {
+    for (const m of [back, border, face]) {
       if (!m.current) continue;
       m.current.instanceMatrix.needsUpdate = true;
       m.current.computeBoundingSphere();
     }
-  });
+  }, [mine]);
 
   return (
     <>
-      <instancedMesh ref={outer} args={[undefined, undefined, mine.length]}>
-        <circleGeometry args={[plate.outer, plate.sides, plate.start]} />
+      <instancedMesh ref={back} args={[undefined, undefined, mine.length]} castShadow>
+        <cylinderGeometry args={[plate.outer, plate.outer, BACK.depth, plate.sides, 1, false, plate.start]} />
+        <meshStandardMaterial color={palette.signBack} roughness={0.6} />
+      </instancedMesh>
+      <instancedMesh ref={border} args={[undefined, undefined, mine.length]}>
+        <cylinderGeometry args={[plate.outer, plate.outer, BORDER.depth, plate.sides, 1, false, plate.start]} />
         <meshBasicMaterial color={plate.border} toneMapped={false} />
       </instancedMesh>
-      <instancedMesh ref={inner} args={[undefined, undefined, mine.length]}>
-        <circleGeometry args={[plate.inner, plate.sides, plate.start]} />
+      <instancedMesh ref={face} args={[undefined, undefined, mine.length]}>
+        <cylinderGeometry args={[plate.inner, plate.inner, FACE.depth, plate.sides, 1, false, plate.start]} />
         <meshBasicMaterial color={plate.face} toneMapped={false} />
       </instancedMesh>
     </>
