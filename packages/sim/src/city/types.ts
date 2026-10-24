@@ -54,6 +54,10 @@ export interface Segment {
   reverse: number;
   /** Right of way at the end node: approaches with a lower rank yield to higher ones. */
   rank: number;
+  /** Right of way actually used at an unsignalised (or flashing) junction: the rank, lowered for a give way or stop sign. */
+  priority: number;
+  /** OSM give way or stop sign on this approach (all-way stops sign every approach). */
+  control?: 'stop' | 'giveWay';
   /** Signal phase of this approach at the end node (0 when unsignalised). */
   phase: number;
   /** OSM layer: below 0 a tunnel, above 0 a bridge deck; 0 is street level. */
@@ -260,6 +264,14 @@ export interface Poi {
   z: number;
 }
 
+/** A sign at the end of an approach segment, facing its traffic. */
+export interface TrafficSign {
+  kind: 'stop' | 'giveWay' | 'priority';
+  seg: number;
+  /** Mapped in OSM, rather than added for a rank difference or for the other arms of an all-way stop. */
+  osm: boolean;
+}
+
 export interface City {
   districtId: string;
   /** District file version (content hash). */
@@ -284,6 +296,8 @@ export interface City {
   /** Raw timetable section of the district (stops, patterns, calendar). */
   transit: DistrictTransit;
   pois: Poi[];
+  /** Priority signs in the scene: the OSM ones and those the ranks imply. */
+  signs: TrafficSign[];
   /** Fast lookups. */
   segmentByKey: Map<string, number>;
   addressById: Map<string, Address>;

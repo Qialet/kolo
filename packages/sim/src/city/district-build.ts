@@ -22,6 +22,7 @@ import type { District, RoadClass, RoadEdge } from './district.js';
 import { buildTwins } from './corridors.js';
 import { layoutDepots } from './depots.js';
 import { addPlaces, parkCars } from './places.js';
+import { applySigns } from './signs.js';
 import { addTransit } from './transit-places.js';
 import type { City, CityNode, Connector, Lane, RoadStrip, Segment, Street, Turn } from './types.js';
 
@@ -148,6 +149,7 @@ export function buildCityFromDistrict(district: District): City {
     busLines: [],
     transit: district.transit,
     pois: [],
+    signs: [],
     segmentByKey: new Map(),
     addressById: new Map(),
   };
@@ -225,6 +227,7 @@ export function buildCityFromDistrict(district: District): City {
       const from = cityNode(forward ? e.a : e.b);
       const to = cityNode(forward ? e.b : e.a);
       const base = polyline(pts);
+      const rank = RANK[e.src.cls] + (e.src.roundabout ? RING_BONUS : 0);
       const seg: Segment = {
         id: city.segments.length,
         from: from.id,
@@ -236,7 +239,8 @@ export function buildCityFromDistrict(district: District): City {
         length: base.length,
         speed: e.src.speed,
         reverse: -1,
-        rank: RANK[e.src.cls] + (e.src.roundabout ? RING_BONUS : 0),
+        rank,
+        priority: rank,
         phase: 0,
         layer: e.src.layer,
       };
@@ -419,6 +423,8 @@ export function buildCityFromDistrict(district: District): City {
   addTransit(city, district.transit);
   layoutDepots(city, district.depotSites);
   parkCars(city);
+  // Last: marking a few segments with a control changes their shape, which slows every later pass over the segments.
+  applySigns(city, roads.nodes, (id) => info[id]!.base, (id) => !city.nodes[id]!.boundary && roadDegreeOf.get(id)! >= 3);
   return city;
 }
 
