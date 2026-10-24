@@ -174,6 +174,10 @@ export interface RoadNode {
   signals?: true;
   giveWay?: true;
   stop?: true;
+  /** All-way stop (OSM stop=all): every approach of the junction stops. */
+  stopAll?: true;
+  /** Unit travel direction (x, z) of the traffic a give way or stop sign faces, 0.01 precision; absent when OSM gives no direction. */
+  signDir?: [number, number];
   /** Cut by the district frame: traffic enters and leaves the world here. */
   boundary?: true;
 }

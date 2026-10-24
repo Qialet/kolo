@@ -180,6 +180,26 @@ describe('importRoads', () => {
     expect(roads.nodes.filter((n) => n.signals)).toHaveLength(1);
   });
 
+  it('keeps the travel direction a give way or stop sign applies to', () => {
+    const o = osm();
+    const c = o.node(0, 0);
+    const fwd = o.node(-30, 0, { highway: 'give_way', direction: 'forward' });
+    const bwd = o.node(30, 0, { highway: 'give_way', direction: 'backward' });
+    const plain = o.node(0, -30, { highway: 'give_way' });
+    const all = o.node(0, 30, { highway: 'stop', stop: 'all', direction: 'forward' });
+    o.way([o.node(-60, 0), fwd, c, bwd, o.node(60, 0)], { highway: 'residential' });
+    o.way([o.node(0, -60), plain, c, o.node(0, 60)], { highway: 'residential' });
+    o.way([o.node(0, 60), all, c], { highway: 'residential' });
+    const roads = importRoads(o.els, box);
+    const at = (x: number, z: number) => roads.nodes.find((n) => Math.hypot(n.x - x, n.z - z) < 0.5)!;
+    expect(at(-30, 0)).toMatchObject({ giveWay: true, signDir: [1, 0] });
+    expect(at(30, 0)).toMatchObject({ giveWay: true, signDir: [-1, 0] });
+    expect(at(0, -30).giveWay).toBe(true);
+    expect(at(0, -30).signDir).toBeUndefined();
+    expect(at(0, 30)).toMatchObject({ stop: true, stopAll: true, signDir: [0, -1] });
+    expect(at(0, 30).giveWay).toBeUndefined();
+  });
+
   it('maps turn restrictions onto the edges around the via node', () => {
     const o = osm();
     const c = o.node(0, 0);

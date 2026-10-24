@@ -219,6 +219,20 @@ export function importRoads(elements: OsmElement[], bbox: BBoxDeg): DistrictRoad
     return p;
   };
 
+  // A give way or stop sign with direction=forward / backward faces traffic travelling along / against its way.
+  const signDir = new Map<number, Vec2>();
+  for (const w of ways) {
+    w.nodes.forEach((id, i) => {
+      const tags = osmNodes.get(id)?.tags;
+      const sense = tags?.direction === 'forward' ? 1 : tags?.direction === 'backward' ? -1 : 0;
+      if (!sense || !isControl(id) || tags?.highway === 'traffic_signals' || signDir.has(id)) return;
+      const p = pos(w.nodes[Math.max(0, i - 1)]!);
+      const q = pos(w.nodes[Math.min(w.nodes.length - 1, i + 1)]!);
+      const len = Math.hypot(q.x - p.x, q.z - p.z);
+      if (len > 0) signDir.set(id, { x: (sense * (q.x - p.x)) / len, z: (sense * (q.z - p.z)) / len });
+    });
+  }
+
   interface RawEdge {
     info: WayInfo;
     pts: RunPoint[];
@@ -249,6 +263,9 @@ export function importRoads(elements: OsmElement[], bbox: BBoxDeg): DistrictRoad
       if (hw === 'traffic_signals') n.signals = true;
       if (hw === 'give_way') n.giveWay = true;
       if (hw === 'stop') n.stop = true;
+      if (hw === 'stop' && osmNodes.get(osmId)?.tags?.stop === 'all') n.stopAll = true;
+      const dir = signDir.get(osmId);
+      if (dir) n.signDir = [round2(dir.x), round2(dir.z)];
       if (!key.startsWith('n')) n.boundary = true;
       nodeByKey.set(key, n);
     }
@@ -283,6 +300,7 @@ export function importRoads(elements: OsmElement[], bbox: BBoxDeg): DistrictRoad
 }
 
 const round1 = (v: number) => Math.round(v * 10) / 10 + 0;
+const round2 = (v: number) => Math.round(v * 100) / 100 + 0;
 
 function largestScc(nodes: RoadNode[], edges: RoadEdge[]): Set<number> {
   const outside = nodes.reduce((m, n) => Math.max(m, n.id), -1) + 1;
