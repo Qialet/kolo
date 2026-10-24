@@ -61,6 +61,11 @@ export const palette = {
   green: '#22D47A',
   lampOff: '#3A3F4A',
   pole: '#5B6372',
+  // Road signs: matte, the classic red, white and yellow of Serbian signs.
+  signRed: '#D8343F',
+  signWhite: '#FFFFFF',
+  signYellow: '#F6C343',
+  signBack: '#A3ACB9',
   // Civilian cars stay neutral so taxis pop.
   cars: ['#FFFFFF', '#E7EAF0', '#B9C1CD', '#8C96A5', '#5E6878', '#3A4250', '#C9C2B8'],
   glass: '#55637C',

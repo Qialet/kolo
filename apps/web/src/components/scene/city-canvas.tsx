@@ -10,6 +10,7 @@ import { CameraRig, HOME_OFFSET, HOME_ZOOM, homeOf, SceneLights } from './camera
 import { CityStatic } from './city-static';
 import { Overlays } from './overlays';
 import { TrafficLights } from './traffic-lights';
+import { TrafficSigns } from './traffic-signs';
 import { ParkedCars, Vehicles } from './vehicles';
 import { LabelProjector } from './world-labels';
 
@@ -35,6 +36,7 @@ export default function CityCanvas() {
       <CameraRig />
       <CityStatic city={city} />
       <TrafficLights city={city} />
+      <TrafficSigns city={city} />
       <ParkedCars city={city} />
       <Vehicles />
       <Overlays city={city} />
