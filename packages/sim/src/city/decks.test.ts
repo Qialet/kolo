@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { poseAlong } from '../geometry.js';
-import { connectorY, DECK_CLEARANCE, inTunnel, laneY, nodeY, RAMP_GRADE, RAMP_GRADE_MAX, segmentY, TUNNEL_HIDE } from './decks.js';
+import { connectorY, DECK_CLEARANCE, inTunnel, laneY, nodeY, pierClearance, RAMP_GRADE, RAMP_GRADE_MAX, segmentY, TUNNEL_HIDE } from './decks.js';
 import type { RoadEdge } from './district.js';
 import { district } from './district.fixture.js';
 import { buildCityFromDistrict } from './district-build.js';
@@ -107,6 +107,19 @@ describe('bridge decks', () => {
       expect(Math.abs(connectorY(city, c.id, 0) - laneY(city, c.from, from.length))).toBeLessThan(0.05);
       expect(Math.abs(connectorY(city, c.id, c.line.length) - laneY(city, c.to, 0))).toBeLessThan(0.05);
     }
+  });
+});
+
+describe('bridge piers', () => {
+  it('keeps a pier off the street under the deck, not off the deck itself', () => {
+    const city = overpass(150);
+    const clear = pierClearance(city);
+    // The street runs along z = 0, a lane each side of the centre line.
+    expect(clear({ x: 0, z: 0 }, 0.6, 6)).toBe(false);
+    expect(clear({ x: 0, z: 3 }, 0.6, 6)).toBe(false);
+    expect(clear({ x: 0, z: 8 }, 0.6, 6)).toBe(true);
+    // Under the middle of the deck, away from the street: the deck's own lanes are not below it.
+    expect(clear({ x: 0, z: 60 }, 0.6, 6)).toBe(true);
   });
 });
 

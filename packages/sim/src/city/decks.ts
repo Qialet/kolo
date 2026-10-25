@@ -1,5 +1,6 @@
 import { poseAlong, projectOnPolyline, type Polyline, type Vec2 } from '../geometry.js';
 import { segmentDistance } from '../import/polygons.js';
+import { SegmentGrid } from './places.js';
 import type { City, Lane } from './types.js';
 
 /** Height of a bridge deck per OSM layer. */
@@ -118,8 +119,11 @@ function overpasses(city: City, layer: number, boxes: Float64Array): Overpass[] 
  * node where it meets a lower level (its joints) at RAMP_GRADE, steeper up to RAMP_GRADE_MAX where a
  * lane passing under it would lack DECK_CLEARANCE. Within a junction's circle the height is the node's.
  * Levels go up in order, so a joint stands as high as the level below it there. Tunnels stay at 0.
+ * Returns the exact height along a segment's centre line (the stored samples are 4 m apart and cut
+ * the corner where a ramp leaves a junction's circle).
  */
-export function layDecks(city: City, baseOf: (seg: number) => Polyline) {
+export function layDecks(city: City, baseOf: (seg: number) => Polyline): (seg: number, s: number) => number {
+  const exact = new Map<number, (s: number) => number>();
   const { segments, nodes } = city;
   const layersAt = nodes.map((n) => [...n.in, ...n.out].map((s) => segments[s]!.layer));
   const levels = [...new Set(segments.map((s) => s.layer).filter((l) => l > 0))].sort((a, b) => a - b);
@@ -185,6 +189,7 @@ export function layDecks(city: City, baseOf: (seg: number) => Polyline) {
     }
     for (const g of segments) {
       if (g.layer !== layer) continue;
+      exact.set(g.id, (s) => heightAt(g.id, s));
       g.y = samplesOf(g.length, (s) => heightAt(g.id, s));
       const base = baseOf(g.id);
       for (const id of g.lanes) {
@@ -199,6 +204,7 @@ export function layDecks(city: City, baseOf: (seg: number) => Polyline) {
       if (h > 0) n.y = h;
     }
   }
+  return (seg, s) => exact.get(seg)?.(s) ?? 0;
 }
 
 /** Places where a deck passes over a lane of a lower level with less than DECK_CLEARANCE of headroom, the lowest per 20 m. */
@@ -215,4 +221,35 @@ export function deckClearances(city: City): { x: number; z: number; clearance: n
     }
   }
   return [...worst.values()].sort((a, b) => a.clearance - b.clearance);
+}
+
+/** Height below a deck under which a lane counts as passing beneath it, not running on it. */
+const BENEATH = 2;
+
+/**
+ * A test for a bridge pier of half-width `half` standing at `p` under a deck `y` high: false when a
+ * lane or junction curve of a lower level runs there (its centre line nearer than half its width
+ * plus `half`), so piers never stand in a carriageway or on a track below.
+ */
+export function pierClearance(city: City): (p: Vec2, half: number, y: number) => boolean {
+  const grid = new SegmentGrid<{ line: Polyline; s0: number; at: (s: number) => number; half: number }>();
+  const add = (line: Polyline, at: (s: number) => number, half: number) => {
+    const p = line.points;
+    for (let i = 1; i < p.length; i++) grid.add(p[i - 1]!, p[i]!, { line, s0: line.cum[i - 1]!, at, half });
+  };
+  const halfOf = (lane: number) => {
+    const seg = city.segments[city.lanes[lane]!.seg]!;
+    return seg.rail ? 1.3 : city.streets[seg.street]!.laneWidth / 2;
+  };
+  for (const l of city.lanes) if (city.segments[l.seg]!.layer >= 0) add(l.line, (s) => laneY(city, l.id, s), halfOf(l.id));
+  for (const c of city.connectors) if (city.segments[city.lanes[c.from]!.seg]!.layer >= 0) add(c.line, (s) => connectorY(city, c.id, s), halfOf(c.from));
+  return (p, half, y) => {
+    for (const { a, b, item } of grid.near(p, half + 4)) {
+      if (segmentDistance(p, a, b) > half + item.half) continue;
+      const t = Math.hypot(b.x - a.x, b.z - a.z);
+      const along = t > 0 ? Math.max(0, Math.min(t, ((p.x - a.x) * (b.x - a.x) + (p.z - a.z) * (b.z - a.z)) / t)) : 0;
+      if (item.at(item.s0 + along) < y - BENEATH) return false;
+    }
+    return true;
+  };
 }

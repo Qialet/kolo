@@ -5,6 +5,7 @@ import {
   BAY_WIDTH,
   connectorY,
   laneY,
+  pierClearance,
   polyline,
   poseAlong,
   roadSurface,
@@ -298,7 +299,7 @@ export function buildRoadGeometry(city: City) {
 }
 
 /** Bridge decks: a slab under the asphalt with sides, parapets once off the ground, piers under the high stretches. */
-const DECK = { slab: 1, parapet: 0.8, parapetWidth: 0.3, parapetFrom: 1.5, pier: 1.2, pierFrom: 2.5, pierStep: 25, twinPiers: 12, railHalf: 1.7 } as const;
+const DECK = { slab: 1, parapet: 0.8, parapetWidth: 0.3, parapetFrom: 1.5, pier: 1.2, pierFrom: 2.5, pierStep: 25, pierShift: 10, twinPiers: 12, railHalf: 1.7 } as const;
 
 /**
  * A band along a polyline between the offset lines `at` and `at + width` (to the right, negative to
@@ -332,8 +333,11 @@ function band(points: Vec2[], side: Vec2[], at: number, width: number, bottom: n
   return paint(g, color);
 }
 
+/** Where a pier may stand: off every lane and junction curve below the deck. */
+type PierTest = ReturnType<typeof pierClearance>;
+
 /** Slab sides, parapets and piers of a deck strip `left` / `right` of its line, its surface at `lift` above the street. */
-function deckSides(parts: THREE.BufferGeometry[], points: Vec2[], left: number, right: number, lift: number[]) {
+function deckSides(parts: THREE.BufferGeometry[], points: Vec2[], left: number, right: number, lift: number[], clear: PierTest) {
   const side = mitres(points);
   const under = lift.map((y) => Math.max(LEVEL.ground, y - DECK.slab));
   const top = lift.map((y) => y + LEVEL.road);
@@ -356,14 +360,23 @@ function deckSides(parts: THREE.BufferGeometry[], points: Vec2[], left: number, 
   const line = polyline(points);
   const width = left + right;
   const axes = width > DECK.twinPiers ? [(right - left) / 2 - width / 2 + 2, (right - left) / 2 + width / 2 - 2] : [(right - left) / 2];
-  for (let s = DECK.pierStep / 2; s < line.length; s += DECK.pierStep) {
+  const liftAt = (s: number) => {
     const k = line.cum.findIndex((c) => c >= s);
     const t = k > 0 ? (s - line.cum[k - 1]!) / (line.cum[k]! - line.cum[k - 1]! || 1) : 0;
-    const y = k > 0 ? lift[k - 1]! + (lift[k]! - lift[k - 1]!) * t : lift[0]!;
-    if (y < DECK.pierFrom) continue;
+    return k > 0 ? lift[k - 1]! + (lift[k]! - lift[k - 1]!) * t : lift[0]!;
+  };
+  for (let s = DECK.pierStep / 2; s < line.length; s += DECK.pierStep) {
     for (const lateral of axes) {
-      const p = poseAlong(line, s, lateral);
-      parts.push(part(DECK.pier, y - DECK.slab - LEVEL.ground, DECK.pier, palette.deckSide, p.x, LEVEL.ground, p.z, p.heading));
+      // Off the carriageways below: the nearest clear spot along the deck within a few metres, else none.
+      for (let k = 0; k <= DECK.pierShift; k = k > 0 ? -k : 2 - k) {
+        const at = s + k;
+        const y = liftAt(at);
+        if (at < 0 || at > line.length || y < DECK.pierFrom) continue;
+        const p = poseAlong(line, at, lateral);
+        if (!clear(p, DECK.pier / 2, y)) continue;
+        parts.push(part(DECK.pier, y - DECK.slab - LEVEL.ground, DECK.pier, palette.deckSide, p.x, LEVEL.ground, p.z, p.heading));
+        break;
+      }
     }
   }
 }
@@ -374,11 +387,12 @@ function deckSides(parts: THREE.BufferGeometry[], points: Vec2[], left: number, 
  */
 export function buildDeckGeometry(city: City) {
   const parts: THREE.BufferGeometry[] = [];
+  const clear = pierClearance(city);
   for (const r of city.roads) {
     if (r.layer < 0 || !r.y) continue;
     const g = ribbon(r.points, r.left, r.right, LEVEL.road, palette.asphalt, r.y);
     if (g) parts.push(g);
-    deckSides(parts, r.points, r.left, r.right, r.y);
+    deckSides(parts, r.points, r.left, r.right, r.y, clear);
   }
   for (const pad of city.pads) {
     if (!pad.y) continue;
@@ -390,7 +404,7 @@ export function buildDeckGeometry(city: City) {
     if (!lift) return;
     const g = ribbon(line.points, DECK.railHalf, DECK.railHalf, LEVEL.ballast, palette.deck, lift);
     if (g) parts.push(g);
-    deckSides(parts, line.points, DECK.railHalf, DECK.railHalf, lift);
+    deckSides(parts, line.points, DECK.railHalf, DECK.railHalf, lift, clear);
   };
   for (const lane of railLanes(city)) slab(lane.line, liftAlong(lane.line, (s) => laneY(city, lane.id, s)));
   for (const c of railConnectors(city)) slab(c.line, liftAlong(c.line, (s) => connectorY(city, c.id, s)));

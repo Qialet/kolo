@@ -8,7 +8,7 @@ import { buildCityFromDistrict } from './district-build.js';
 import { pointInPolygon } from '../import/polygons.js';
 import { findRings } from './rings.js';
 import { auditRoads } from './road-audit.js';
-import { laneY } from './decks.js';
+import { laneY, nodeY } from './decks.js';
 import type { City } from './types.js';
 
 /** Processor time of this test process in ms: unlike the wall clock it does not grow when other test processes compete for the CPU. */
@@ -247,6 +247,17 @@ describe('buildCityFromDistrict on Belgrade', () => {
     expect(Math.max(...heights)).toBeLessThanOrEqual(20);
     for (const r of city.roads) if (r.layer > 0) expect(r.y?.length).toBe(r.points.length);
     for (const p of city.pads) if ([...city.nodes[p.node]!.in, ...city.nodes[p.node]!.out].every((s) => city.segments[s]!.layer > 0)) expect(p.y).toBeGreaterThan(0);
+    // A raised strip meets its junction's circle at the junction's height: no step up from the pad.
+    for (const r of city.roads) {
+      if (!r.y) continue;
+      for (const [p, y] of [
+        [r.points[0]!, r.y[0]!],
+        [r.points[r.points.length - 1]!, r.y[r.y.length - 1]!],
+      ] as const) {
+        const n = city.nodes.reduce((a, b) => (Math.abs(Math.hypot(b.x - p.x, b.z - p.z) - b.radius) < Math.abs(Math.hypot(a.x - p.x, a.z - p.z) - a.radius) ? b : a));
+        if (Math.abs(Math.hypot(n.x - p.x, n.z - p.z) - n.radius) < 0.3) expect(Math.abs(y - nodeY(city, n.id)), `${n.name} (${Math.round(n.x)}, ${Math.round(n.z)})`).toBeLessThan(0.05);
+      }
+    }
     // Levels meet only where a road changes level: no junction of streets on different levels.
     const joints = city.nodes.filter((n) => new Set([...n.in, ...n.out].map((s) => city.segments[s]!.layer)).size > 1);
     expect(joints.length).toBeLessThanOrEqual(21);

@@ -607,7 +607,7 @@ export function buildCityFromDistrict(district: District): City {
   for (const p of roads.paths ?? []) {
     city.paths.push({ kind: p.kind, width: p.w, points: Array.from({ length: p.pts.length / 2 }, (_, i) => ({ x: p.pts[2 * i]!, z: p.pts[2 * i + 1]! })) });
   }
-  layDecks(city, (id) => info[id]!.base);
+  const deckY = layDecks(city, (id) => info[id]!.base);
   const surfaceRoads: SurfaceRoad[] = [];
   for (const e of edges.values()) {
     if (e.src.cls === 'tram') {
@@ -643,7 +643,7 @@ export function buildCityFromDistrict(district: District): City {
     });
   }
   // A junction pad needs two streets meeting; elsewhere the street runs on to the node.
-  const surface = laySurface(city, surfaceRoads, (n) => !n.boundary && n.radius > 0 && roadDegreeOf.get(n.id)! >= 2);
+  const surface = laySurface(city, surfaceRoads, (n) => !n.boundary && n.radius > 0 && roadDegreeOf.get(n.id)! >= 2, deckY);
   city.roads = surface.strips;
   city.pads = surface.pads;
   // The island stays clear of asphalt: a small ring's pad wraps round it, a big ring's pads stop at its kerb.

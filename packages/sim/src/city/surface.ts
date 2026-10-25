@@ -54,9 +54,10 @@ interface Mouth {
 /**
  * Asphalt of the road network: every road is a strip cut where its junction pad takes over, and
  * every junction a pad joining the mouths of its roads by kerb returns. Nodes in `padded` get a pad;
- * roads end at the junction circle there and run on to the node elsewhere.
+ * roads end at the junction circle there and run on to the node elsewhere. A strip on a bridge deck
+ * takes its heights from `deckY` along its segment.
  */
-export function laySurface(city: City, roads: SurfaceRoad[], padded: (node: CityNode) => boolean) {
+export function laySurface(city: City, roads: SurfaceRoad[], padded: (node: CityNode) => boolean, deckY: (seg: number, s: number) => number = (seg, s) => segmentY(city, seg, s)) {
   const mouths = new Map<number, Mouth[]>();
   const addMouth = (node: CityNode, m: Mouth) => {
     const list = mouths.get(node.id) ?? [];
@@ -73,7 +74,7 @@ export function laySurface(city: City, roads: SurfaceRoad[], padded: (node: City
     const to = { ...r.to, radius: r1 };
     const line = trimToJunctions(r.base, from, to);
     const strip: RoadStrip = { points: line.points, left: r.left, right: r.right, layer: r.layer };
-    if (city.segments[r.seg]!.y) strip.y = line.points.map((p) => Math.round(segmentY(city, r.seg, projectOnPolyline(r.base, p)) * 100) / 100);
+    if (city.segments[r.seg]!.y) strip.y = line.points.map((p) => Math.round(deckY(r.seg, projectOnPolyline(r.base, p)) * 100) / 100);
     strips.push(strip);
     spans.push([projectOnPolyline(r.base, line.points[0]!), projectOnPolyline(r.base, line.points[line.points.length - 1]!)]);
     const kerbL = polyline(offsetPoints(r.base.points, -r.left));
