@@ -7,7 +7,7 @@ import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { frameBuffer, type VehiclePose } from '@/lib/live';
+import { frameBuffer, IN_TUNNEL, type VehiclePose } from '@/lib/live';
 import { palette } from '@/lib/palette';
 import { useVehicles } from '@/lib/queries';
 import { TramTrails, type TrailPose } from '@/lib/tram-trail';
@@ -247,19 +247,21 @@ export function Vehicles() {
     livePoses.clear();
     for (let i = 0; i < n; i++) {
       const p = poses.current[i]!;
-      livePoses.set(p.id, p);
+      const hidden = (p.flags & IN_TUNNEL) !== 0;
+      // A vehicle in a tunnel is out of sight: no model, ring or label (its trail still follows a tram).
+      if (!hidden) livePoses.set(p.id, p);
       if (p.kind === KIND.TRAM) {
         const car = (p.flags & LONG_TRAM) !== 0 ? TRAM.long : TRAM.short;
-        trails.feed(p.id, p.x, p.z, p.heading, car.length);
-        if (trams >= MAX.tram || !inView(p.x, p.z, car.length + 6)) continue;
+        trails.feed(p.id, p.x, p.z, p.heading, car.length, p.y);
+        if (hidden || trams >= MAX.tram || !inView(p.x, p.z, car.length + 6)) continue;
         const grow = Math.max(0.01, Math.min(1, p.age / 500)) * 1.15;
         const sections = trails.sections(p.id, car.length, car.sections, sectionPoses);
         const along = (car.length / car.sections - TRAM_JOINT) / TRAM_MODEL;
         sections.forEach((q, j) => {
           const k = counts.tram++;
           idLists.tram[k] = p.id;
-          tmp.position.set(q.x, 0.2, q.z);
-          tmp.rotation.set(0, q.heading, 0);
+          tmp.position.set(q.x, 0.2 + q.y, q.z);
+          tmp.rotation.set(-q.pitch, q.heading, 0, 'YXZ');
           // 15% larger across like every vehicle, true length along the track.
           tmp.scale.set(grow, grow, along);
           tmp.updateMatrix();
@@ -272,9 +274,10 @@ export function Vehicles() {
         // Overlays (selection ring, label, camera follow) take the middle of the car, not its front.
         p.x = sections.reduce((a, q) => a + q.x, 0) / sections.length;
         p.z = sections.reduce((a, q) => a + q.z, 0) / sections.length;
+        p.y = sections.reduce((a, q) => a + q.y, 0) / sections.length;
         continue;
       }
-      if (!inView(p.x, p.z, 12)) continue;
+      if (hidden || !inView(p.x, p.z, 12)) continue;
       const group: Group =
         p.kind === KIND.TAXI ? 'taxi' : p.kind === KIND.BUS ? 'bus' : p.kind === KIND.TROLLEY ? 'trolley' : p.kind === KIND.MINIBUS ? 'minibus' : 'car';
       const k = counts[group];
@@ -282,8 +285,8 @@ export function Vehicles() {
       counts[group]++;
       idLists[group][k] = p.id;
       const grow = Math.min(1, p.age / 500);
-      tmp.position.set(p.x, 0.2, p.z);
-      tmp.rotation.set(0, p.heading, 0);
+      tmp.position.set(p.x, 0.2 + p.y, p.z);
+      tmp.rotation.set(-p.pitch, p.heading, 0, 'YXZ');
       // Vehicles are drawn ~15% larger than life so they read as the main actors.
       tmp.scale.setScalar(Math.max(0.01, grow) * 1.15);
       tmp.updateMatrix();
@@ -311,8 +314,8 @@ export function Vehicles() {
         const mine = parkFilter !== null && parkOf.get(p.id) === parkFilter;
         meshes.taxiBody?.setColorAt(k, parkFilter === null || mine ? TAXI_ON : TAXI_DIM);
         if (mine && meshes.taxiHalo) {
-          tmp.position.set(p.x, 0.26, p.z);
-          tmp.rotation.set(-Math.PI / 2, 0, 0);
+          tmp.position.set(p.x, 0.26 + p.y, p.z);
+          tmp.rotation.set(-Math.PI / 2, 0, 0, 'XYZ');
           tmp.scale.setScalar(pulse);
           tmp.updateMatrix();
           meshes.taxiHalo.setMatrixAt(halos++, tmp.matrix);

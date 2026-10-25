@@ -25,9 +25,17 @@ export interface VehiclePose {
   speed: number;
   activity: number;
   flags: number;
+  /** Height above the street (on a bridge deck) and the nose-up tilt on a ramp, radians. */
+  y: number;
+  pitch: number;
   /** ms since the vehicle first appeared (for spawn fade-in). */
   age: number;
 }
+
+/** Frame flag of a vehicle inside a tunnel past its portal: not drawn. */
+export const IN_TUNNEL = 64;
+/** Horizontal move between two frames below which a vehicle keeps its tilt (standing, or crawling). */
+const TILT_MIN_MOVE = 0.2;
 
 interface BufferedFrame {
   localTime: number;
@@ -45,6 +53,8 @@ class FrameBuffer {
   private frames: BufferedFrame[] = [];
   private offsets: number[] = [];
   private firstSeen = new Map<string, number>();
+  /** Last tilt of every vehicle: kept while it stands on a ramp. */
+  private pitch = new Map<string, number>();
   latest: LiveFrame | null = null;
   latestAt = 0;
 
@@ -58,6 +68,7 @@ class FrameBuffer {
       byId.set(v[0], v);
       if (!this.firstSeen.has(v[0])) this.firstSeen.set(v[0], now);
     }
+    for (const id of this.pitch.keys()) if (!byId.has(id)) this.pitch.delete(id);
     this.frames.push({ localTime: frame.wall + offset, frame, byId });
     if (this.frames.length > 30) this.frames.shift();
     this.latest = frame;
@@ -79,7 +90,7 @@ class FrameBuffer {
     let n = 0;
     for (const vb of fb.frame.vehicles) {
       const va = fa.byId.get(vb[0]) ?? vb;
-      const pose = out[n] ?? (out[n] = { id: '', kind: 0, x: 0, z: 0, heading: 0, speed: 0, activity: -1, flags: 0, age: 0 });
+      const pose = out[n] ?? (out[n] = { id: '', kind: 0, x: 0, z: 0, heading: 0, speed: 0, activity: -1, flags: 0, y: 0, pitch: 0, age: 0 });
       pose.id = vb[0];
       pose.kind = vb[1];
       pose.x = va[2] + (vb[2] - va[2]) * t;
@@ -88,6 +99,14 @@ class FrameBuffer {
       pose.speed = vb[5];
       pose.activity = vb[6];
       pose.flags = vb[7];
+      const ya = va[8] ?? 0;
+      const yb = vb[8] ?? 0;
+      pose.y = ya + (yb - ya) * t;
+      const move = Math.hypot(vb[2] - va[2], vb[3] - va[3]);
+      let pitch = this.pitch.get(vb[0]) ?? 0;
+      if (move > TILT_MIN_MOVE) this.pitch.set(vb[0], (pitch = Math.atan2(yb - ya, move)));
+      else if (yb === 0 && ya === 0) pitch = 0;
+      pose.pitch = pitch;
       pose.age = now - (this.firstSeen.get(vb[0]) ?? now);
       n++;
     }

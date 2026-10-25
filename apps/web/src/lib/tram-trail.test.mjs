@@ -77,3 +77,23 @@ test('trams gone from the frame are pruned', () => {
   assert.ok(trails.points('a') > 0);
   assert.equal(trails.points('b'), 0);
 });
+
+test('sections up a ramp take the heights the front passed and tilt with it', () => {
+  const trails = new TramTrails();
+  // Level for 20 m, then up 6 m over the next 40 m (15%).
+  for (let k = 1; k <= 600; k++) {
+    const x = k * 0.1;
+    trails.feed('t', x, 0, EAST, 19, x <= 20 ? 0 : (x - 20) * 0.15);
+  }
+  const [front, rear] = trails.sections('t', 19, 2);
+  // Front section [0, 9.5] behind x = 60: from 6 m down to 4.6 m.
+  near(front.y, 6 - 0.15 * 4.75, 0.05);
+  near(front.pitch, Math.atan(0.15), 0.01);
+  near(rear.y, 6 - 0.15 * 14.25, 0.05);
+  // A jump lays the new trail level at the new height.
+  trails.feed('t', 60, 300, SOUTH, 19, 2);
+  for (const s of trails.sections('t', 19, 2)) {
+    near(s.y, 2, 0.01);
+    near(s.pitch, 0, 0.01);
+  }
+});

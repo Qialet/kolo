@@ -885,7 +885,7 @@ export class Simulation {
         Math.round(v.speed * 10) / 10,
         taxi ? TAXI_ACTIVITIES.indexOf(taxi.activity) : -1,
         flags,
-        Math.round(this.traffic.heightOf(v) * 10) / 10,
+        Math.round(this.traffic.heightOf(v) * 100) / 100,
       ]);
     }
     const lights = this.traffic.signalStates.map((st) =>

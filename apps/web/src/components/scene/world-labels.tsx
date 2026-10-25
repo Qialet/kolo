@@ -27,7 +27,7 @@ export function LabelProjector() {
           el.style.visibility = 'hidden';
           continue;
         }
-        v.set(p.x, a.y, p.z);
+        v.set(p.x, a.y + p.y, p.z);
       } else v.set(a.x, a.y, a.z);
       v.project(camera);
       const x = ((v.x + 1) / 2) * size.width;

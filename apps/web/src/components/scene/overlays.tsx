@@ -131,8 +131,11 @@ function VehicleRing({ id, color, size = 5 }: { id: string; color: string; size?
   useFrame(({ clock }) => {
     const pose = livePoses.get(id);
     const m = ring.current;
-    if (!pose || !m) return;
-    m.position.set(pose.x, 0.26, pose.z);
+    if (!m) return;
+    // Out of the poses while in a tunnel: the ring waits hidden.
+    m.visible = !!pose;
+    if (!pose) return;
+    m.position.set(pose.x, 0.26 + pose.y, pose.z);
     const s = 1 + Math.sin(clock.elapsedTime * 4) * 0.08;
     m.scale.set(s, s, s);
   });
