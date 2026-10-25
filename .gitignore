@@ -17,3 +17,6 @@ data/raw/
 !.claude/
 !**/.claude/
 .claude/settings.local.json
+
+# Agent scratch output (road maps, timings)
+/tmp/

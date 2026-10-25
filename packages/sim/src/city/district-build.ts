@@ -23,8 +23,9 @@ import { buildTwins } from './corridors.js';
 import { layoutDepots } from './depots.js';
 import { addPlaces, parkCars } from './places.js';
 import { applySigns } from './signs.js';
+import { laySurface, offsetPoints, pointAt, trimToJunctions, type SurfaceRoad } from './surface.js';
 import { addTransit } from './transit-places.js';
-import type { City, CityNode, Connector, Lane, RoadStrip, Segment, Street, Turn } from './types.js';
+import type { City, CityNode, Connector, Lane, Segment, Street, Turn } from './types.js';
 
 /** Junction nodes joined by roads shorter than this become one junction (dual carriageways). */
 const CLUSTER_EDGE = 18;
@@ -137,6 +138,7 @@ export function buildCityFromDistrict(district: District): City {
     lanes: [],
     connectors: [],
     roads: [],
+    pads: [],
     tracks: [],
     areas: [],
     buildings: [],
@@ -415,10 +417,26 @@ export function buildCityFromDistrict(district: District): City {
   void signalPoints;
   for (const id of largestCarScc(city)) city.segments[id]!.core = true;
   buildTwins(city);
+  const surfaceRoads: SurfaceRoad[] = [];
   for (const e of edges.values()) {
-    if (e.src.cls === 'tram') city.tracks.push({ points: e.pts, layer: e.src.layer });
-    else city.roads.push(roadStrip(e));
+    if (e.src.cls === 'tram') {
+      city.tracks.push({ points: e.pts, layer: e.src.layer });
+      continue;
+    }
+    // A two-way road has both segments; a one-way road (folded edges may run backward) is centred either way.
+    // The segment's base carries any stub past the frame.
+    const pair = segOfEdge.get(e.id)!;
+    const seg = (pair.fwd ?? pair.bwd)!;
+    const w = laneWidthOf(e.src.cls);
+    const twoWay = e.lanesFwd > 0 && e.lanesBwd > 0;
+    const half = ((e.lanesFwd + e.lanesBwd) * w) / 2;
+    const [from, to] = [city.nodes[seg.from]!, city.nodes[seg.to]!];
+    surfaceRoads.push({ base: info[seg.id]!.base, from, to, left: twoWay ? e.lanesBwd * w : half, right: twoWay ? e.lanesFwd * w : half, layer: e.src.layer });
   }
+  // A junction pad needs two streets meeting; elsewhere the street runs on to the node.
+  const surface = laySurface(city, surfaceRoads, (n) => !n.boundary && n.radius > 0 && roadDegreeOf.get(n.id)! >= 2);
+  city.roads = surface.strips;
+  city.pads = surface.pads;
   addPlaces(city, district);
   addTransit(city, district.transit);
   layoutDepots(city, district.depotSites);
@@ -426,14 +444,6 @@ export function buildCityFromDistrict(district: District): City {
   // Last: marking a few segments with a control changes their shape, which slows every later pass over the segments.
   applySigns(city, roads.nodes, (id) => info[id]!.base, (id) => !city.nodes[id]!.boundary && roadDegreeOf.get(id)! >= 3);
   return city;
-}
-
-/** Paved width around the OSM centre line: two-way lanes sit right and left of it, one-way lanes centred. */
-function roadStrip(e: WorkEdge): RoadStrip {
-  const w = laneWidthOf(e.src.cls);
-  const twoWay = e.lanesFwd > 0 && e.lanesBwd > 0;
-  const half = ((e.lanesFwd + e.lanesBwd) * w) / 2;
-  return { points: e.pts, left: twoWay ? e.lanesBwd * w : half, right: twoWay ? e.lanesFwd * w : half, layer: e.src.layer };
 }
 
 /** Largest set of segments that cars can drive between in both directions without leaving the map. */
@@ -564,83 +574,6 @@ function chordTangent(line: Polyline, atStart: boolean): Vec2 {
   const b = atStart ? pointAt(line, span) : pointAt(line, line.length);
   const d = sub(b, a);
   return Math.hypot(d.x, d.z) > 1e-6 ? norm(d) : atStart ? startTangent(line) : endTangent(line);
-}
-
-function pointAt(line: Polyline, s: number): Vec2 {
-  const { points, cum } = line;
-  let i = 1;
-  while (i < points.length - 1 && cum[i]! < s) i++;
-  const a = points[i - 1]!;
-  const b = points[i]!;
-  const len = cum[i]! - cum[i - 1]! || 1;
-  const t = Math.max(0, Math.min(1, (s - cum[i - 1]!) / len));
-  return { x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t };
-}
-
-/** Parallel polyline `d` metres to the right (mitred joins, limited at sharp bends). */
-export function offsetPoints(points: Vec2[], d: number): Vec2[] {
-  const n = points.length;
-  const normals: Vec2[] = [];
-  for (let i = 1; i < n; i++) {
-    const t = norm(sub(points[i]!, points[i - 1]!));
-    normals.push({ x: -t.z, z: t.x });
-  }
-  return points.map((p, i) => {
-    if (i === 0) return add(p, scale(normals[0]!, d));
-    if (i === n - 1) return add(p, scale(normals[n - 2]!, d));
-    const n1 = normals[i - 1]!;
-    const n2 = normals[i]!;
-    const m = norm(add(n1, n2));
-    const k = Math.max(0.5, dot(m, n1));
-    return add(p, scale(m, d / k));
-  });
-}
-
-/** Cuts a lane centre line where it leaves the start junction and enters the end junction. */
-function trimToJunctions(line: Polyline, from: CityNode, to: CityNode): Polyline {
-  const L = line.length;
-  let s0 = exitArc(line, from, from.radius, true);
-  let s1 = exitArc(line, to, to.radius, false);
-  // Junction circles may overlap on short roads: keep at least 2.5 m of lane (or the whole road).
-  const minLen = Math.min(2.5, L);
-  if (L - s0 - s1 < minLen) {
-    const f = Math.max(0, (L - minLen) / Math.max(1e-6, s0 + s1));
-    s0 *= f;
-    s1 *= f;
-  }
-  return slice(line, s0, L - s1);
-}
-
-/** Arc length from the given end of the line to where it leaves a circle of radius r around the node. */
-function exitArc(line: Polyline, node: Vec2, r: number, fromStart: boolean): number {
-  if (r <= 0) return 0;
-  const L = line.length;
-  const at = (s: number) => pointAt(line, fromStart ? s : L - s);
-  if (dist(at(0), node) >= r) return 0;
-  let lo = 0;
-  let hi = L;
-  if (dist(at(hi), node) < r) return L;
-  // Walk out in 1 m steps, then bisect.
-  for (let s = 1; s <= L; s += 1) {
-    if (dist(at(s), node) >= r) {
-      hi = s;
-      lo = s - 1;
-      break;
-    }
-  }
-  for (let k = 0; k < 20; k++) {
-    const mid = (lo + hi) / 2;
-    if (dist(at(mid), node) < r) lo = mid;
-    else hi = mid;
-  }
-  return hi;
-}
-
-function slice(line: Polyline, s0: number, s1: number): Polyline {
-  const pts: Vec2[] = [pointAt(line, s0)];
-  for (let i = 1; i < line.points.length - 1; i++) if (line.cum[i]! > s0 + 0.05 && line.cum[i]! < s1 - 0.05) pts.push(line.points[i]!);
-  pts.push(pointAt(line, s1));
-  return polyline(pts);
 }
 
 // ───────────────────────────── lanes and connectors ─────────────────────────────

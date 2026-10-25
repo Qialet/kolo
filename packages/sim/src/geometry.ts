@@ -115,6 +115,18 @@ export function quadBezier(p0: Vec2, c: Vec2, p1: Vec2, steps = 10): Vec2[] {
   return out;
 }
 
+/** Cubic Bézier from p0 to p1 through control points c0 and c1, as steps + 1 points. */
+export function cubicBezier(p0: Vec2, c0: Vec2, c1: Vec2, p1: Vec2, steps = 10): Vec2[] {
+  const out: Vec2[] = [];
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    const u = 1 - t;
+    const [a, b, c, d] = [u * u * u, 3 * u * u * t, 3 * u * t * t, t * t * t];
+    out.push({ x: a * p0.x + b * c0.x + c * c1.x + d * p1.x, z: a * p0.z + b * c0.z + c * c1.z + d * p1.z });
+  }
+  return out;
+}
+
 /** Intersection point of two infinite lines p + t·d. */
 export function lineIntersection(p: Vec2, d: Vec2, q: Vec2, e: Vec2): Vec2 | null {
   const den = cross(d, e);

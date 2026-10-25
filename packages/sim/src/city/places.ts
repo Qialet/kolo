@@ -23,11 +23,15 @@ const PARK_INTO_SIDEWALK = 2.75;
 
 const ring = (flat: number[]): Vec2[] => Array.from({ length: flat.length / 2 }, (_, i) => ({ x: flat[2 * i]!, z: flat[2 * i + 1]! }));
 const CELL = 50;
+/** Largest margin a road-surface query asks for around a junction pad. */
+const PAD_MARGIN = 5;
 const key = (cx: number, cz: number) => `${cx},${cz}`;
 
 /** Coarse uniform grid over line pieces. */
 export class SegmentGrid<T> {
-  private readonly cells = new Map<string, { a: Vec2; b: Vec2; item: T }[]>();
+  private readonly cells = new Map<string, { a: Vec2; b: Vec2; item: T; query: number }[]>();
+  /** Number of the last query: a piece lying in several cells is returned once per query. */
+  private query = 0;
 
   add(a: Vec2, b: Vec2, item: T) {
     const x0 = Math.floor(Math.min(a.x, b.x) / CELL);
@@ -37,26 +41,28 @@ export class SegmentGrid<T> {
     for (let cx = x0; cx <= x1; cx++) {
       for (let cz = z0; cz <= z1; cz++) {
         const list = this.cells.get(key(cx, cz)) ?? [];
-        list.push({ a, b, item });
+        list.push({ a, b, item, query: 0 });
         this.cells.set(key(cx, cz), list);
       }
     }
   }
 
-  *near(p: Vec2, reach: number) {
+  near(p: Vec2, reach: number): { a: Vec2; b: Vec2; item: T }[] {
     const r = Math.ceil(reach / CELL);
     const cx = Math.floor(p.x / CELL);
     const cz = Math.floor(p.z / CELL);
-    const seen = new Set<object>();
+    const query = ++this.query;
+    const out: { a: Vec2; b: Vec2; item: T }[] = [];
     for (let dx = -r; dx <= r; dx++) {
       for (let dz = -r; dz <= r; dz++) {
         for (const piece of this.cells.get(key(cx + dx, cz + dz)) ?? []) {
-          if (seen.has(piece)) continue;
-          seen.add(piece);
-          yield piece;
+          if (piece.query === query) continue;
+          piece.query = query;
+          out.push(piece);
         }
       }
     }
+    return out;
   }
 }
 
@@ -140,16 +146,34 @@ export function buildingIndex(buildings: Pick<Building, 'id' | 'outline' | 'hole
   };
 }
 
-/** Whether a point lies on the paved part of any road. */
-export function roadSurface(city: City): (p: Vec2, pad?: number) => boolean {
+/** Whether a point lies on the paved part of any road (within `pad` metres), the pads of `except` junctions left out. */
+export function roadSurface(city: City): (p: Vec2, pad?: number, except?: (node: number) => boolean) => boolean {
   const grid = new SegmentGrid<number>();
   for (const road of city.roads) {
     if (road.layer < 0) continue;
     const half = Math.max(road.left, road.right);
     for (let i = 1; i < road.points.length; i++) grid.add(road.points[i - 1]!, road.points[i]!, half);
   }
-  return (p, pad = 0) => {
+  // Junction pads by the cells their box (widened by the largest margin asked for) covers.
+  const pads = city.pads.filter((j) => j.layer >= 0).map((j) => ({ node: j.node, outline: j.outline, box: boxOf(j.outline) }));
+  const padCells = new Map<string, number[]>();
+  pads.forEach(({ box }, i) => {
+    for (let cx = Math.floor((box.x0 - PAD_MARGIN) / CELL); cx <= Math.floor((box.x1 + PAD_MARGIN) / CELL); cx++) {
+      for (let cz = Math.floor((box.z0 - PAD_MARGIN) / CELL); cz <= Math.floor((box.z1 + PAD_MARGIN) / CELL); cz++) {
+        const list = padCells.get(key(cx, cz)) ?? [];
+        list.push(i);
+        padCells.set(key(cx, cz), list);
+      }
+    }
+  });
+  return (p, pad = 0, except) => {
     for (const { a, b, item } of grid.near(p, 30)) if (segmentDistance(p, a, b) < item + pad) return true;
+    for (const i of padCells.get(key(Math.floor(p.x / CELL), Math.floor(p.z / CELL))) ?? []) {
+      const { node, outline, box } = pads[i]!;
+      if (p.x < box.x0 - pad || p.x > box.x1 + pad || p.z < box.z0 - pad || p.z > box.z1 + pad || except?.(node)) continue;
+      if (pointInPolygon(p, outline, [])) return true;
+      if (pad > 0 && outline.some((a, k) => segmentDistance(p, a, outline[(k + 1) % outline.length]!) < pad)) return true;
+    }
     return false;
   };
 }

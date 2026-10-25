@@ -148,31 +148,32 @@ const isRail = (city: City, lane: number) => !!city.segments[city.lanes[lane]!.s
 /** Street segments among a node's legs (tram tracks left out). */
 const roadLegs = (city: City, segs: number[]) => segs.filter((s) => !city.segments[s]!.rail);
 
-/** Lane edge points at its start (atEnd = false) or end, shifted half a lane to each side. */
-function laneEnds(city: City, lane: Lane, atEnd: boolean): Vec2[] {
-  const w = laneWidth(city, lane) / 2;
-  const s = atEnd ? lane.length : 0;
-  return [-w, w].map((lat) => {
-    const p = poseAlong(lane.line, s, lat);
-    return { x: p.x, z: p.z };
-  });
+/** Whether a closed outline crosses itself (any two non-adjacent edges intersect). */
+function selfIntersects(ring: Vec2[]): boolean {
+  const n = ring.length;
+  const side = (a: Vec2, b: Vec2, c: Vec2) => Math.sign((b.x - a.x) * (c.z - a.z) - (b.z - a.z) * (c.x - a.x));
+  for (let i = 0; i < n; i++) {
+    const a = ring[i]!;
+    const b = ring[(i + 1) % n]!;
+    for (let j = i + 2; j < n; j++) {
+      if (i === 0 && j === n - 1) continue;
+      const c = ring[j]!;
+      const d = ring[(j + 1) % n]!;
+      if (side(a, b, c) * side(a, b, d) < 0 && side(c, d, a) * side(c, d, b) < 0) return true;
+    }
+  }
+  return false;
 }
 
-function convexHull(points: Vec2[]): Vec2[] {
-  const pts = [...points].sort((a, b) => a.x - b.x || a.z - b.z);
-  if (pts.length < 3) return pts;
-  const cross = (o: Vec2, a: Vec2, b: Vec2) => (a.x - o.x) * (b.z - o.z) - (a.z - o.z) * (b.x - o.x);
-  const lower: Vec2[] = [];
-  for (const p of pts) {
-    while (lower.length >= 2 && cross(lower[lower.length - 2]!, lower[lower.length - 1]!, p) <= 0) lower.pop();
-    lower.push(p);
-  }
-  const upper: Vec2[] = [];
-  for (const p of [...pts].reverse()) {
-    while (upper.length >= 2 && cross(upper[upper.length - 2]!, upper[upper.length - 1]!, p) <= 0) upper.pop();
-    upper.push(p);
-  }
-  return [...lower.slice(0, -1), ...upper.slice(0, -1)];
+/** Junction pad: its outline triangulated, or a fan from the junction centre when the outline crosses itself. */
+function padGeometry(outline: Vec2[], centre: Vec2, y: number, color: string): THREE.BufferGeometry {
+  if (!selfIntersects(outline)) return flatPolygon(outline, [], y, color);
+  const pos: number[] = [];
+  outline.forEach((a, i) => {
+    const b = outline[(i + 1) % outline.length]!;
+    pos.push(centre.x, y, centre.z, a.x, y, a.z, b.x, y, b.z);
+  });
+  return paint(upward(pos), color);
 }
 
 /** Pavement under the district (beyond it, the sky plane) and land cover polygons. */
@@ -184,7 +185,6 @@ export function buildGroundGeometry(city: City) {
   return merge(parts);
 }
 
-/** Asphalt: a ribbon per road and the convex hull of the lane ends at every junction. */
 /** Stops at a kerb (not on a track), with their curb lane and the kerb's offset from its centre. */
 function curbStops(city: City) {
   return city.busStops
@@ -216,6 +216,7 @@ function bayOutline(stop: BusStop, lane: Lane, kerb: number): Vec2[] {
   return [...inner, ...outer.reverse()];
 }
 
+/** Asphalt: a strip per road, a pad per junction and the bus bays. */
 export function buildRoadGeometry(city: City) {
   const parts: THREE.BufferGeometry[] = [];
   for (const r of city.roads) {
@@ -224,15 +225,7 @@ export function buildRoadGeometry(city: City) {
     const g = ribbon(r.points, r.left, r.right, LEVEL.road, palette.asphalt);
     if (g) parts.push(g);
   }
-  for (const node of city.nodes) {
-    if (node.radius <= 0) continue;
-    // Tracks cross the junction on their own; a track-only junction gets no asphalt.
-    const pts: Vec2[] = [];
-    for (const s of roadLegs(city, node.in)) for (const l of city.segments[s]!.lanes) pts.push(...laneEnds(city, city.lanes[l]!, true));
-    for (const s of roadLegs(city, node.out)) for (const l of city.segments[s]!.lanes) pts.push(...laneEnds(city, city.lanes[l]!, false));
-    const hull = convexHull(pts);
-    if (hull.length >= 3) parts.push(flatPolygon(hull, [], LEVEL.road + 0.001, palette.asphalt));
-  }
+  for (const pad of city.pads) if (pad.layer >= 0) parts.push(padGeometry(pad.outline, city.nodes[pad.node]!, LEVEL.road + 0.001, palette.asphalt));
   // Bus bays cut into the sidewalk, just under the street's own asphalt where they meet.
   for (const { stop, lane, kerb } of curbStops(city)) if (stop.bay) parts.push(flatPolygon(bayOutline(stop, lane, kerb), [], LEVEL.road - 0.002, palette.asphalt));
   return merge(parts);

@@ -34,17 +34,22 @@ const BAY_WALK = 1.6;
  * Whether a bay fits at a curb stop: inside its lane, with no building on the bay or the sidewalk behind it
  * and no other road on the bay.
  */
-function bayFits(city: City, lane: Lane, s: number, inBuilding: (p: Vec2) => string | undefined, onRoad: (p: Vec2) => boolean): boolean {
+function bayFits(city: City, lane: Lane, s: number, inBuilding: (p: Vec2) => string | undefined, onRoad: RoadSurface): boolean {
   if (s - BAY_BACK < 0 || s + BAY_FWD > lane.length) return false;
-  const kerb = city.streets[city.segments[lane.seg]!.street]!.laneWidth / 2;
+  const seg = city.segments[lane.seg]!;
+  const kerb = city.streets[seg.street]!.laneWidth / 2;
+  // The kerb returns of the street's own junctions may meet a bay at its ends.
+  const own = (node: number) => node === seg.from || node === seg.to;
   for (let at = s - BAY_BACK; at <= s + BAY_FWD; at += 2) {
     for (const off of [0.5, BAY_WIDTH / 2, BAY_WIDTH, BAY_WIDTH + BAY_WALK]) {
       const p = lanePoint(city, lane.id, at, kerb + off);
-      if (inBuilding(p) || (off <= BAY_WIDTH && onRoad(p))) return false;
+      if (inBuilding(p) || (off <= BAY_WIDTH && onRoad(p, 0, own))) return false;
     }
   }
   return true;
 }
+
+type RoadSurface = ReturnType<typeof roadSurface>;
 
 /** Every street lane above ground, for keeping tram platforms off them. */
 function streetLanes(city: City): SegmentGrid<number> {

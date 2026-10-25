@@ -145,13 +145,21 @@ export interface Track {
   layer: number;
 }
 
-/** Asphalt of one road between junctions: its OSM centre line and the paved width on each side. */
+/** Asphalt of one road between junction pads: its centre line cut at the pads and the paved width on each side. */
 export interface RoadStrip {
   points: Vec2[];
   /** Metres to the left / right of the line in its point order. */
   left: number;
   right: number;
   /** OSM layer: tunnels (below 0) are not drawn over the blocks above them. */
+  layer: number;
+}
+
+/** Asphalt of a junction: the mouths of its roads joined by kerb returns. */
+export interface JunctionPad {
+  node: number;
+  outline: Vec2[];
+  /** Highest OSM layer among its roads. */
   layer: number;
 }
 
@@ -285,6 +293,7 @@ export interface City {
   lanes: Lane[];
   connectors: Connector[];
   roads: RoadStrip[];
+  pads: JunctionPad[];
   tracks: Track[];
   areas: Area[];
   buildings: Building[];

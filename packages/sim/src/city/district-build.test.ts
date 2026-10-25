@@ -5,6 +5,7 @@ import { createRng } from '../rng.js';
 import type { District } from './district.js';
 import { district, plus, segOf } from './district.fixture.js';
 import { buildCityFromDistrict } from './district-build.js';
+import { auditRoads } from './road-audit.js';
 import type { City } from './types.js';
 
 /** Processor time of this test process in ms: unlike the wall clock it does not grow when other test processes compete for the CPU. */
@@ -211,6 +212,16 @@ describe('buildCityFromDistrict on Belgrade', () => {
   it('builds the city in well under a second', () => {
     // About 0.35 s of wall time alone; processor time also counts GC threads and grows under parallel test load.
     expect(buildMs).toBeLessThan(1000);
+  });
+
+  it('lays asphalt where vehicles drive and nowhere else', () => {
+    const audit = auditRoads(city, real);
+    // Before junction pads: 9 strips sticking out of junctions, convex hulls over sidewalks and houses.
+    expect(audit.stripEndsOffJunction.length).toBeLessThanOrEqual(3);
+    expect(audit.buildingsUnderPads.length).toBeLessThanOrEqual(2);
+    expect(audit.connectorsOffAsphalt.length).toBeLessThanOrEqual(25);
+    const pads = new Set(city.pads.map((p) => p.node));
+    for (const n of city.nodes) if (!n.boundary && n.radius > 0 && n.in.length + n.out.length >= 3 && n.in.some((s) => !city.segments[s]!.rail)) expect(pads.has(n.id), n.name).toBe(true);
   });
 
   it('lays the tram tracks as rail segments joined only to each other', () => {
