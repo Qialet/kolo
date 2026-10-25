@@ -40,7 +40,7 @@ async function drawMaps(maps, out) {
     const fill = r.layer < 0 ? 'none' : r.layer > 0 ? '#8a94a8' : '#9aa0a8';
     parts.push(`<path d="M${[...left, ...right.reverse()].map(P).join('L')}Z" fill="${fill}" stroke="${r.layer < 0 ? '#c33' : 'none'}" stroke-width="0.3"/>`);
   }
-  for (const pad of city.pads) parts.push(`<path d="M${pad.outline.map(P).join('L')}Z" fill="#7d8590" fill-opacity="0.85" stroke="#d33" stroke-width="0.25"/>`);
+  for (const pad of city.pads) parts.push(`<path d="M${pad.outline.map(P).join('L')}Z${pad.island ? `M${pad.island.map(P).join('L')}Z` : ''}" fill-rule="evenodd" fill="#7d8590" fill-opacity="0.85" stroke="#d33" stroke-width="0.25"/>`);
   for (const l of city.lanes) {
     const rail = city.segments[l.seg].rail;
     parts.push(`<polyline points="${l.line.points.map(P).join(' ')}" fill="none" stroke="${rail ? '#8b4a12' : '#fff'}" stroke-width="${rail ? 0.9 : 0.25}"/>`);

@@ -160,6 +160,8 @@ export interface RoadStrip {
 export interface JunctionPad {
   node: number;
   outline: Vec2[];
+  /** Island of a small ring the pad wraps round: a hole in the asphalt. */
+  island?: Vec2[];
   /** Highest OSM layer among its roads. */
   layer: number;
 }

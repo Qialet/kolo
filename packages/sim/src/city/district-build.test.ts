@@ -5,6 +5,8 @@ import { createRng } from '../rng.js';
 import type { District } from './district.js';
 import { district, plus, segOf } from './district.fixture.js';
 import { buildCityFromDistrict } from './district-build.js';
+import { pointInPolygon } from '../import/polygons.js';
+import { findRings } from './rings.js';
 import { auditRoads } from './road-audit.js';
 import type { City } from './types.js';
 
@@ -219,7 +221,9 @@ describe('buildCityFromDistrict on Belgrade', () => {
     // Before junction pads: 9 strips sticking out of junctions, convex hulls over sidewalks and houses.
     expect(audit.stripEndsOffJunction.length).toBeLessThanOrEqual(3);
     expect(audit.buildingsUnderPads.length).toBeLessThanOrEqual(2);
-    expect(audit.connectorsOffAsphalt.length).toBeLessThanOrEqual(25);
+    expect(audit.connectorsOffAsphalt.length).toBeLessThanOrEqual(22);
+    // Before rings of their own: 100 lane stubs, most between junction circles overlapping on the rings.
+    expect(audit.stubLanes.length).toBeLessThanOrEqual(80);
     // Before tapers, rounded bends and S-bends: 6 pinched bends, 426 kinks and 52 connectors running backwards.
     expect(audit.stripSharpBends).toHaveLength(0);
     expect(audit.backwardConnectors).toHaveLength(0);
@@ -296,6 +300,54 @@ describe('buildCityFromDistrict on Belgrade', () => {
         // Trams crossing the ring go first (rank 20); every street entry yields.
         if (city.streets[o.street]!.name !== 'Trg Slavija' && !o.rail) expect(o.rank).toBeLessThan(s.rank);
       }
+    }
+  });
+
+  it('keeps the Slavija ring one road round its island, entries merging into its outer lanes', () => {
+    const isRing = (lane: number) => {
+      const s = city.segments[city.lanes[lane]!.seg]!;
+      return !s.rail && city.streets[s.street]!.name === 'Trg Slavija';
+    };
+    const pieces = real.roads.edges
+      .filter((e) => e.roundabout && e.name === 'Trg Slavija')
+      .map((e) => ({ a: e.a, b: e.b, pts: Array.from({ length: e.pts.length / 2 }, (_, i) => ({ x: e.pts[2 * i]!, z: e.pts[2 * i + 1]! })), half: 8 }));
+    const [ring] = findRings(pieces);
+    // Before: the junction circles swallowed the ring, leaving lane stubs and chords across it.
+    const ringLanes = city.lanes.filter((l) => isRing(l.id));
+    expect(ringLanes.length).toBeGreaterThanOrEqual(8 * 5);
+    for (const l of ringLanes) expect(l.length).toBeGreaterThan(2.5);
+    const nodes = new Set(ringLanes.map((l) => city.segments[l.seg]!.to));
+    for (const c of city.connectors) {
+      if (!nodes.has(c.node) || railOf(c.from)) continue;
+      if (isRing(c.from) && isRing(c.to)) expect(c.line.length).toBeLessThan(18);
+      for (const q of c.line.points) expect(pointInPolygon(q, ring!.island, [])).toBe(false);
+      if (!isRing(c.from) && isRing(c.to)) {
+        const [a, b] = [city.lanes[c.from]!, city.lanes[c.to]!];
+        expect(b.index).toBeGreaterThanOrEqual(b.lanesInSeg - a.lanesInSeg);
+      }
+    }
+    for (const pad of city.pads) if (nodes.has(pad.node)) for (const q of pad.outline) expect(pointInPolygon(q, ring!.island, [])).toBe(false);
+  });
+
+  it('collapses a small ring into one junction that cars drive round its island', () => {
+    const pad = city.pads.find((p) => p.island && city.nodes[p.node]!.name === 'Terazije')!;
+    expect(pad).toBeDefined();
+    const c = pad.island!.reduce((s, q) => ({ x: s.x + q.x / pad.island!.length, z: s.z + q.z / pad.island!.length }), { x: 0, z: 0 });
+    const r = Math.hypot(pad.island![0]!.x - c.x, pad.island![0]!.z - c.z);
+    const conns = city.connectors.filter((k) => k.node === pad.node);
+    expect(conns.some((k) => k.turn === 'L')).toBe(true);
+    for (const k of conns) for (const q of k.line.points) expect(Math.hypot(q.x - c.x, q.z - c.z)).toBeGreaterThan(r + 1);
+  });
+
+  it('runs two lights a short link apart as one, the link going green at both together', () => {
+    const pairs = city.segments.filter((s) => {
+      const [a, b] = [city.nodes[s.from]!, city.nodes[s.to]!];
+      return !s.rail && a.signal && b.signal && a.signal.phases.length === 2 && s.length - a.radius - b.radius < 30;
+    });
+    expect(pairs.length).toBeGreaterThanOrEqual(2);
+    for (const s of pairs) {
+      const [a, b] = [city.nodes[s.from]!, city.nodes[s.to]!];
+      expect(b.signal!.offset, `${a.name} → ${b.name}`).toBe(a.signal!.offset);
     }
   });
 

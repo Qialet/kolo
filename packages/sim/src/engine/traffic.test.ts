@@ -233,4 +233,25 @@ describe('waitLimit', () => {
     expect(v.mode).toBe('lane');
     expect(traffic.waitLimit(v)).toBe(Math.max(120, cycleOf(traffic.signals[light.id]!.plan) + 90));
   });
+
+  it('gives the whole queue at a red light a cycle and a half minute, not only the first at the line', () => {
+    const city = chain();
+    const traffic = new TrafficSystem(city);
+    const light = city.nodes.find((n) => n.signal)!;
+    const seg = segOf(city, [-100, 0], [0, 0]);
+    const into = city.lanes[seg.lanes[0]!]!;
+    for (let t = 0; t < 200 && traffic.signalStates[light.id]!.aspects[seg.phase] !== 'RED'; t += 0.05) traffic.step(0.05);
+    const queue = [2, 10].map((back, i) => {
+      const v = makeVehicle(`q${i}`, 'CAR', createRng(i + 1));
+      traffic.add(v);
+      traffic.placeOnLane(v, into.id, into.length - back);
+      expect(traffic.planTo(v, { seg: segOf(city, [0, 0], E).id })).toBe(true);
+      return v;
+    });
+    traffic.step(0.05);
+    expect(traffic.signalStates[light.id]!.aspects[seg.phase]).toBe('RED');
+    expect(queue[1]!.mode).toBe('lane');
+    expect(into.length - queue[1]!.s).toBeGreaterThan(2);
+    expect(traffic.waitLimit(queue[1]!)).toBe(Math.max(120, cycleOf(traffic.signals[light.id]!.plan) + 30));
+  });
 });

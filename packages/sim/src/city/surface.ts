@@ -29,14 +29,17 @@ export interface SurfaceRoad {
   /** Arc lengths along the base where the lanes meet the `from` / `to` junction: the ends of those running in, else the starts of those leaving. */
   stopFrom: number;
   stopTo: number;
+  /** Distance from the `from` / `to` junction's centre at which the strip ends (where that junction gets a pad). */
+  cutFrom: number;
+  cutTo: number;
 }
 
 /** Where a road meets its junction pad: the cut across the asphalt, looking out of the junction. */
 interface Mouth {
   at: Vec2;
-  /** Where the left / right kerb enters the junction circle: the kerb returns start there, by the lane ends. */
-  innerLeft: Vec2;
-  innerRight: Vec2;
+  /** Where the left / right kerb enters the junction circle: the kerb returns start there, by the lane ends (null: at the mouth's corner). */
+  innerLeft: Vec2 | null;
+  innerRight: Vec2 | null;
   /** Unit direction from the junction into the road. */
   out: Vec2;
   /** Paved width to the left / right when looking out along `out`. */
@@ -61,8 +64,8 @@ export function laySurface(city: City, roads: SurfaceRoad[], padded: (node: City
   /** Span of every road's base that its strip covers. */
   const spans: [number, number][] = [];
   for (const r of roads) {
-    const r0 = padded(r.from) ? r.from.radius : 0;
-    const r1 = padded(r.to) ? r.to.radius : 0;
+    const r0 = padded(r.from) ? r.cutFrom : 0;
+    const r1 = padded(r.to) ? r.cutTo : 0;
     const from = { ...r.from, radius: r0 };
     const to = { ...r.to, radius: r1 };
     const line = trimToJunctions(r.base, from, to);
@@ -71,7 +74,10 @@ export function laySurface(city: City, roads: SurfaceRoad[], padded: (node: City
     const kerbL = polyline(offsetPoints(r.base.points, -r.left));
     const kerbR = polyline(offsetPoints(r.base.points, r.right));
     const enter = (kerb: Polyline, atStart: boolean) => {
-      const s = exitArc(kerb, atStart ? from : to, atStart ? r0 : r1, atStart);
+      const node = atStart ? from : to;
+      // A kerb further out than the circle (a wide ring through a small cut) never enters it: the mouth is cut square there.
+      if (dist(pointAt(kerb, atStart ? 0 : kerb.length), node) >= node.radius) return null;
+      const s = exitArc(kerb, node, node.radius, atStart);
       return pointAt(kerb, atStart ? s : kerb.length - s);
     };
     const { layer } = r;
@@ -146,17 +152,22 @@ function padOutline(centre: Vec2, mouths: Mouth[]): Vec2[] {
   const legs = mouths
     .map((m) => {
       const side = rightOf(m.out);
+      const left = sub(m.at, scale(side, m.left));
+      const right = add(m.at, scale(side, m.right));
+      const innerLeft = m.innerLeft ?? left;
+      const innerRight = m.innerRight ?? right;
       // Turning order by where the mouth lies (the two carriageways of a road point the same way).
       // rightOf turns the way atan2(z, x) grows: the left corner comes first in turning order.
-      return { m, angle: Math.atan2(m.at.z - centre.z, m.at.x - centre.x), corners: [m.innerLeft, sub(m.at, scale(side, m.left)), add(m.at, scale(side, m.right)), m.innerRight] };
+      const corners = [...(m.innerLeft ? [m.innerLeft] : []), left, right, ...(m.innerRight ? [m.innerRight] : [])];
+      return { m, innerLeft, innerRight, angle: Math.atan2(m.at.z - centre.z, m.at.x - centre.x), corners };
     })
     .sort((a, b) => a.angle - b.angle);
   const out: Vec2[] = [];
   legs.forEach((leg, i) => {
     const next = legs[(i + 1) % legs.length]!;
     out.push(...leg.corners);
-    const a = leg.m.innerRight;
-    const b = next.m.innerLeft;
+    const a = leg.innerRight;
+    const b = next.innerLeft;
     const c = lineIntersection(a, leg.m.out, b, next.m.out);
     if (c && dot(sub(c, a), leg.m.out) < 0 && dot(sub(c, b), next.m.out) < 0 && dist(c, a) + dist(c, b) < FILLET_REACH * dist(a, b) + 10) {
       out.push(...quadBezier(a, c, b, FILLET_STEPS).slice(1, -1));

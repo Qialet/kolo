@@ -180,9 +180,9 @@ function selfIntersects(ring: Vec2[]): boolean {
   return false;
 }
 
-/** Junction pad: its outline triangulated, or a fan from the junction centre when the outline crosses itself. */
-function padGeometry(outline: Vec2[], centre: Vec2, y: number, color: string): THREE.BufferGeometry {
-  if (!selfIntersects(outline)) return flatPolygon(outline, [], y, color);
+/** Junction pad: its outline triangulated (round a small ring's island), or a fan from the junction centre when the outline crosses itself. */
+function padGeometry(outline: Vec2[], island: Vec2[] | undefined, centre: Vec2, y: number, color: string): THREE.BufferGeometry {
+  if (island || !selfIntersects(outline)) return flatPolygon(outline, island ? [island] : [], y, color);
   const pos: number[] = [];
   outline.forEach((a, i) => {
     const b = outline[(i + 1) % outline.length]!;
@@ -240,7 +240,7 @@ export function buildRoadGeometry(city: City) {
     const g = ribbon(r.points, r.left, r.right, LEVEL.road, palette.asphalt);
     if (g) parts.push(g);
   }
-  for (const pad of city.pads) if (pad.layer >= 0) parts.push(padGeometry(pad.outline, city.nodes[pad.node]!, LEVEL.road + 0.001, palette.asphalt));
+  for (const pad of city.pads) if (pad.layer >= 0) parts.push(padGeometry(pad.outline, pad.island, city.nodes[pad.node]!, LEVEL.road + 0.001, palette.asphalt));
   // Bus bays cut into the sidewalk, just under the street's own asphalt where they meet.
   for (const { stop, lane, kerb } of curbStops(city)) if (stop.bay) parts.push(flatPolygon(bayOutline(stop, lane, kerb), [], LEVEL.road - 0.002, palette.asphalt));
   return merge(parts);

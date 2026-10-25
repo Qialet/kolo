@@ -25,6 +25,7 @@ import type { District, RoadClass, RoadEdge } from './district.js';
 import { buildTwins } from './corridors.js';
 import { layoutDepots } from './depots.js';
 import { addPlaces, parkCars } from './places.js';
+import { aroundIsland, findRings, pushOutOf, type Ring } from './rings.js';
 import { applySigns } from './signs.js';
 import { laySurface, offsetPoints, placeCrossings, pointAt, slice, trimToJunctions, type SurfaceRoad } from './surface.js';
 import { addTransit } from './transit-places.js';
@@ -37,6 +38,8 @@ const TINY_EDGE = 3;
 const CLUSTER_RADIUS = 30;
 /** Ring pieces shorter than this merge their ends (a car could not stop on them). */
 const RING_TINY = 8;
+/** A ring junction takes in a track crossing at most this far beyond the ring's half width. */
+const RING_REACH = 6;
 /** Length over which a segment's entry / exit direction is measured. */
 const TANGENT_SPAN = 15;
 const CONFLICT_CLEARANCE = 1.6;
@@ -55,6 +58,8 @@ const SIGNAL_REACH = 25;
 const PHASE_ALIGN = Math.cos((30 * Math.PI) / 180);
 const GREEN_MAIN = 45;
 const GREEN_SIDE = 30;
+/** Lights at both ends of a link with less lane than this between them run as one. */
+const SHORT_LINK = 30;
 
 const RANK: Record<RoadClass, number> = {
   trunk: 6,
@@ -100,6 +105,13 @@ export function buildCityFromDistrict(district: District): City {
     edges.set(e.id, { id: e.id, a: e.a, b: e.b, pts, src: e, lanesFwd: e.lanesFwd, lanesBwd: e.lanesBwd, turnFwd: e.turnFwd, turnBwd: e.turnBwd, merged: [e.id] });
   }
   const signalPoints = foldPassThrough(edges, boundary, signalled, nodePos);
+  const rings = findRings(
+    [...edges.values()]
+      .filter((e) => e.src.roundabout)
+      .map((e) => (e.lanesFwd > 0 ? { a: e.a, b: e.b, pts: e.pts, half: halfWidthOf(e) } : { a: e.b, b: e.a, pts: [...e.pts].reverse(), half: halfWidthOf(e) })),
+  );
+  const ringOfOsm = new Map<number, Ring>();
+  for (const ring of rings) for (const n of ring.nodes) ringOfOsm.set(n, ring);
 
   // ── junction clusters ──
   const incident = incidence(edges);
@@ -115,6 +127,14 @@ export function buildCityFromDistrict(district: District): City {
     cluster.set(n, [n]);
     clusterOf.set(n, n);
   }
+  // A small ring is one junction: cars drive round its island through the junction.
+  for (const ring of rings) {
+    if (!ring.mini) continue;
+    const members = [...ring.nodes];
+    for (const m of members) cluster.delete(m);
+    cluster.set(members[0]!, members);
+    for (const m of members) clusterOf.set(m, members[0]!);
+  }
   const candidates = [...edges.values()]
     .map((e) => ({ e, len: polyline(e.pts).length }))
     .filter(({ e, len }) => {
@@ -129,7 +149,14 @@ export function buildCityFromDistrict(district: District): City {
     const cb = clusterOf.get(e.b)!;
     if (ca === cb) continue;
     const members = [...cluster.get(ca)!, ...cluster.get(cb)!];
-    if (!e.src.roundabout && members.filter((m) => ringNode.has(m)).length > 1) continue;
+    // Off the ring a ring junction takes in only what does not size a junction and lies by its outer kerb
+    // (a track crossing its road): a street junction next to it would stretch its circle over the ring.
+    const onRing = members.filter((m) => ringNode.has(m));
+    if (!e.src.roundabout && onRing.length) {
+      if (onRing.length > 1 || members.some((m) => !ringNode.has(m) && sizesJunction.has(m))) continue;
+      const kerb = (ringOfOsm.get(onRing[0]!)?.half ?? 0) + RING_REACH;
+      if (members.some((m) => dist(nodePos.get(m)!, nodePos.get(onRing[0]!)!) > kerb)) continue;
+    }
     const c = centroid(members.map((m) => nodePos.get(m)!));
     if (members.some((m) => dist(nodePos.get(m)!, c) > CLUSTER_RADIUS)) continue;
     cluster.set(ca, members);
@@ -177,6 +204,10 @@ export function buildCityFromDistrict(district: District): City {
   };
   const nodeOfCluster = new Map<number, CityNode>();
   const radius = new Map<number, number>();
+  /** Distance from a junction's centre to its furthest OSM node, sizing or not (a track crossing taken in). */
+  const reach = new Map<number, number>();
+  /** Ring a junction lies on (a small ring: the junction it collapsed into). */
+  const ringAt = new Map<number, Ring>();
   for (const [key, members] of cluster) {
     const used = members.some((m) => (incident.get(m)?.size ?? 0) > 0);
     if (!used) continue;
@@ -197,6 +228,9 @@ export function buildCityFromDistrict(district: District): City {
     city.nodes.push(node);
     nodeOfCluster.set(key, node);
     radius.set(node.id, Math.max(0, ...shape.map((m) => dist(nodePos.get(m)!, c))));
+    reach.set(node.id, Math.max(0, ...members.map((m) => dist(nodePos.get(m)!, c))));
+    const ring = members.map((m) => ringOfOsm.get(m)).find(Boolean);
+    if (ring) ringAt.set(node.id, ring);
   }
   const cityNode = (osmGraphNode: number) => nodeOfCluster.get(clusterOf.get(osmGraphNode)!)!;
 
@@ -317,6 +351,13 @@ export function buildCityFromDistrict(district: District): City {
   };
 
   // ── junction sizes: room for the widest crossing road ──
+  /** Where the ring's own lanes and the roads off it end at a junction on a big ring, from its centre. */
+  const ringCut = new Map<number, { ring: number; road: number }>();
+  /** Distance from a junction's centre at which the road's lanes and asphalt end. */
+  const cutAt = (node: CityNode, e: WorkEdge) => {
+    const cut = ringCut.get(node.id);
+    return cut ? (e.src.roundabout ? cut.ring : cut.road) : node.radius;
+  };
   const degreeOf = new Map<number, number>();
   /** Streets meeting at a node, tracks left out: only road junctions take traffic lights. */
   const roadDegreeOf = new Map<number, number>();
@@ -329,6 +370,19 @@ export function buildCityFromDistrict(district: District): City {
     if (!node.boundary && degree >= 3) {
       r = radius.get(node.id)! + Math.max(...segs.map((s) => halfWidthOf(info[s]!.edge))) + 1.5;
     } else if (!node.boundary && degree === 2) r = 1.5;
+    // On a ring the roads end at its outer kerb, while the ring itself runs on through: the entry
+    // merges into it and the exit leaves it within the width of the road.
+    const ring = ringAt.get(node.id);
+    const roads = segs.filter((s) => !info[s]!.edge.src.roundabout);
+    if (ring && !ring.mini && !node.boundary && roads.length && roads.length < segs.length) {
+      const spread = radius.get(node.id)!;
+      const ringHalf = Math.max(...segs.filter((s) => info[s]!.edge.src.roundabout).map((s) => halfWidthOf(info[s]!.edge)));
+      const roadHalf = Math.max(...roads.map((s) => pavedHalfOf(info[s]!.edge)));
+      // The roads end past any track crossing taken in, so nobody waits on the rails.
+      const cut = { ring: spread + Math.max(3, roadHalf + 1.5), road: Math.max(spread + ringHalf + 1.5, reach.get(node.id)! + 3) };
+      ringCut.set(node.id, cut);
+      r = Math.max(cut.ring, cut.road);
+    }
     node.radius = Math.min(r, CLUSTER_RADIUS);
     const names = [...new Set(segs.map((s) => city.streets[city.segments[s]!.street]!.name).filter(Boolean))];
     node.name = names.slice(0, 3).join(' × ') || 'Raskrsnica';
@@ -356,6 +410,7 @@ export function buildCityFromDistrict(district: District): City {
     if (best && bestGap <= SIGNAL_REACH) lit.add(best.id);
   }
   for (const id of lit) planSignal(city, city.nodes[id]!);
+  pairSignals(city);
 
   // ── roads cut by the frame right next to a junction get a stub outside the frame ──
   for (const seg of city.segments) {
@@ -380,7 +435,19 @@ export function buildCityFromDistrict(district: District): City {
     for (let i = 0; i < si.lanes; i++) {
       const offset = seg.rail ? 0 : si.twoWay ? (i + 0.5) * si.width : (i + 0.5) * si.width - (si.lanes * si.width) / 2;
       const shifted = polyline(offsetPoints(si.base.points, offset));
-      const line = trimToJunctions(shifted, from, to);
+      const circles: [CityNode, CityNode] = [
+        { ...from, radius: cutAt(from, si.edge) },
+        { ...to, radius: cutAt(to, si.edge) },
+      ];
+      let line = trimToJunctions(shifted, ...circles);
+      if (ringCut.has(from.id) || ringCut.has(to.id)) {
+        // On a ring every lane ends square across the road where its centre line leaves the circle: an outer
+        // ring lane can lie wholly outside the circle.
+        const across = trimToJunctions(si.base, ...circles).points;
+        const s0 = projectOnPolyline(shifted, ringCut.has(from.id) ? across[0]! : line.points[0]!);
+        const s1 = projectOnPolyline(shifted, ringCut.has(to.id) ? across[across.length - 1]! : line.points[line.points.length - 1]!);
+        line = slice(shifted, s0, Math.max(s1, s0 + 0.5));
+      }
       const lane: Lane = {
         id: city.lanes.length,
         seg: seg.id,
@@ -472,6 +539,8 @@ export function buildCityFromDistrict(district: District): City {
   // ── connectors ──
   for (const node of city.nodes) {
     const created: Connector[] = [];
+    const ring = ringAt.get(node.id);
+    const mini = ring?.mini ? ring : undefined;
     for (const inId of node.in) {
       const sIn = city.segments[inId]!;
       const only = onlyTo.get(inId);
@@ -494,8 +563,10 @@ export function buildCityFromDistrict(district: District): City {
           continue;
         }
         const lanesOut = sOut.lanes.map((l) => city.lanes[l]!);
-        for (const [i, j] of laneMoves(turn, lanesIn.length, lanesOut.length, marks)) {
-          created.push(connect(city, node, lanesIn[i]!, lanesOut[j]!, turn, sIn, sOut));
+        const onRing = ringCut.has(node.id) ? ringLaneMoves(!!info[inId]!.edge.src.roundabout, !!info[sOut.id]!.edge.src.roundabout, lanesIn.length, lanesOut.length) : null;
+        for (const [i, j] of onRing ?? laneMoves(turn, lanesIn.length, lanesOut.length, marks)) {
+          const round = mini ? connectRound(city, node, lanesIn[i]!, lanesOut[j]!, turn, sIn, sOut, mini) : null;
+          created.push(round ?? connect(city, node, lanesIn[i]!, lanesOut[j]!, turn, sIn, sOut));
         }
       }
       // Dead end of a two-way street: turn around from the inner lane.
@@ -560,12 +631,23 @@ export function buildCityFromDistrict(district: District): City {
       layer: e.src.layer,
       stopFrom: Math.min(...intoFrom),
       stopTo: Math.max(...intoTo),
+      cutFrom: cutAt(from, e),
+      cutTo: cutAt(to, e),
     });
   }
   // A junction pad needs two streets meeting; elsewhere the street runs on to the node.
   const surface = laySurface(city, surfaceRoads, (n) => !n.boundary && n.radius > 0 && roadDegreeOf.get(n.id)! >= 2);
   city.roads = surface.strips;
   city.pads = surface.pads;
+  // The island stays clear of asphalt: a small ring's pad wraps round it, a big ring's pads stop at its kerb.
+  for (const pad of city.pads) {
+    const ring = ringAt.get(pad.node);
+    if (ring?.mini) {
+      // Kerb returns between the mouths keep clear of the ring that cars drive round.
+      pad.outline = pushOutOf(pad.outline, ring.outer);
+      pad.island = ring.island;
+    } else if (ring) pad.outline = pushOutOf(pad.outline, ring.island);
+  }
   city.crossings = placeCrossings(roads.crossings ?? [], surfaceRoads, surface.spans);
   addPlaces(city, district);
   addTransit(city, district.transit);
@@ -615,6 +697,27 @@ function planSignal(city: City, node: CityNode) {
   const phases = groups.map((g) => ({ green: g.some((s) => !s.rail && s.rank === top) ? GREEN_MAIN : GREEN_SIDE }));
   const cycle = cycleOf({ phases, offset: 0 });
   node.signal = { phases, offset: (node.id * 7919) % cycle };
+}
+
+/**
+ * Two-phase lights a short link apart run as one controller: the second takes the first one's plan and
+ * offset, its phases turned so that the link's own direction goes green at both together (otherwise a
+ * queue held on the link by the second light blocks the first junction for a whole cycle).
+ */
+function pairSignals(city: City) {
+  const paired = new Set<number>();
+  for (const s of city.segments) {
+    const a = city.nodes[s.from]!;
+    const b = city.nodes[s.to]!;
+    if (s.rail || !a.signal || !b.signal || paired.has(b.id) || paired.has(a.id)) continue;
+    if (a.signal.phases.length !== 2 || b.signal.phases.length !== 2 || s.length - a.radius - b.radius >= SHORT_LINK) continue;
+    // The approach to `a` that runs on along the link carries the phase the link's traffic leaves on.
+    const feeder = a.in.map((id) => city.segments[id]!).find((f) => !f.rail && dot(f.dirOut, s.dirIn) > PHASE_ALIGN);
+    if (!feeder) continue;
+    if (s.phase !== feeder.phase) for (const id of b.in) city.segments[id]!.phase = 1 - city.segments[id]!.phase;
+    b.signal = { phases: a.signal.phases.map((p) => ({ ...p })), offset: a.signal.offset };
+    paired.add(a.id).add(b.id);
+  }
 }
 
 // ───────────────────────────── graph simplification ─────────────────────────────
@@ -732,6 +835,11 @@ function halfWidthOf(e: WorkEdge) {
   return e.lanesFwd > 0 && e.lanesBwd > 0 ? Math.max(e.lanesFwd, e.lanesBwd) * w : ((e.lanesFwd + e.lanesBwd) * w) / 2;
 }
 
+/** Half the paved width of the whole road, both directions. */
+function pavedHalfOf(e: WorkEdge) {
+  return ((e.lanesFwd + e.lanesBwd) * laneWidthOf(e.src.cls)) / 2;
+}
+
 /** Direction over the first / last TANGENT_SPAN metres: robust to tiny kinks at OSM nodes. */
 function chordTangent(line: Polyline, atStart: boolean): Vec2 {
   const span = Math.min(TANGENT_SPAN, line.length);
@@ -781,6 +889,24 @@ function laneMoves(turn: Turn, nIn: number, nOut: number, marks: Set<Turn>[] | n
     [...from].reverse().forEach((i, r) => [nOut - 1 - r, nOut - 2 - r].forEach((j) => push(i, j)));
   }
   return out;
+}
+
+/**
+ * (in, out) lane pairs where a road enters or leaves a big ring: the lanes keep their order from the
+ * outer kerb (entries merge into the outer lanes, exits leave from them); null for any other move.
+ */
+function ringLaneMoves(inRing: boolean, outRing: boolean, nIn: number, nOut: number): [number, number][] | null {
+  if (inRing === outRing) return null;
+  if (!inRing) return Array.from({ length: nIn }, (_, i) => [i, Math.max(0, i + nOut - nIn)]);
+  return Array.from({ length: nOut }, (_, j) => [Math.max(0, j + nIn - nOut), j]);
+}
+
+/** Connector round the island of a small ring, held to the speed of its curve; null when the ends lie too close round it. */
+function connectRound(city: City, node: CityNode, inLane: Lane, outLane: Lane, turn: Turn, sIn: Segment, sOut: Segment, ring: Ring): Connector | null {
+  const points = aroundIsland(ring, inLane.end, endTangent(inLane.line), outLane.start, startTangent(outLane.line));
+  if (!points) return null;
+  const vmax = Math.max(3.5, Math.min(sIn.speed, sOut.speed, Math.sqrt(2.4 * ring.radius)));
+  return addConnector(city, node, inLane, outLane, turn, sIn, polyline(points), vmax);
 }
 
 /**

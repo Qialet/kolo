@@ -389,14 +389,14 @@ export class TrafficSystem {
   }
 
   /**
-   * Seconds a vehicle may stand before it counts as stuck: a cycle plus 30 s when it is first at a
-   * red stop line (a four-phase light keeps one approach red for over two minutes); held at the line by
-   * a queue on the lane ahead that ends at a light, that light's cycle plus 30 s plus a minute for the
-   * queue to drain; else 120 s.
+   * Seconds a vehicle may stand before it counts as stuck: a cycle plus 30 s when it waits out the red
+   * of the light its lane ends at, first at the line or queued behind it (a four-phase light keeps one
+   * approach red for over two minutes); held at the line by a queue on the lane ahead that ends at a
+   * light, that light's cycle plus 30 s plus a minute for the queue to drain; else 120 s.
    */
   waitLimit(v: Vehicle): number {
     const next = v.path[v.pathIdx + 1];
-    if (v.mode !== 'lane' || !next || this.city.lanes[v.lane]!.length - v.s > 2) return 120;
+    if (v.mode !== 'lane' || !next) return 120;
     const c = this.city.connectors[next.conn]!;
     const sig = this.signals[c.node];
     const state = this.signalStates[c.node];
@@ -404,6 +404,7 @@ export class TrafficSystem {
     // Standing since before this green came on is still waiting out the red: the first seconds of green count with it.
     const greenFor = aspect === 'GREEN' && sig ? sig.plan.phases[c.phase]!.green - state!.left[c.phase]! : Infinity;
     if (sig && (aspect === 'RED' || aspect === 'RED_AMBER' || v.stoppedFor > greenFor)) return Math.max(120, cycleOf(sig.plan) + 30);
+    if (this.city.lanes[v.lane]!.length - v.s > 2) return 120;
     const ahead = this.signals[this.city.segments[this.city.lanes[c.to]!.seg]!.to];
     return ahead && this.boxBlocked(v, c) ? Math.max(120, cycleOf(ahead.plan) + 90) : 120;
   }
@@ -701,6 +702,8 @@ export class TrafficSystem {
             const next = w.path[w.pathIdx + 1];
             if (next && c.conflicts.includes(next.conn)) {
               const theirs = city.connectors[next.conn]!;
+              // One held by a queue beyond the junction could not go anyway: yielding to them would hold both.
+              if (this.boxBlocked(w, theirs)) break;
               const st = this.signalStates[theirs.node];
               const aspect = st && !isFlashing(st) ? st.aspects[theirs.phase] : 'GREEN';
               if (aspect === 'GREEN' || aspect === 'AMBER') return true;
