@@ -26,7 +26,7 @@ import {
   type TaxiDetail,
 } from '@kolo/contracts';
 import { lanePoint } from '../city/lanes.js';
-import { stopPickup } from '../city/transit-places.js';
+import { stopPickupS } from '../city/transit-places.js';
 import type { BusStop, City, CurbRef, Depot, Slot } from '../city/types.js';
 import { dist, type Vec2 } from '../geometry.js';
 import { createRng, type Rng } from '../rng.js';
@@ -186,9 +186,10 @@ export class Simulation {
     for (const a of city.addresses) this.places.set(a.id, { id: a.id, label: a.label, lane: a.lane, s: a.s, x: a.x, z: a.z });
     const pickupStops: BusStop[] = [];
     for (const st of city.busStops) {
-      // Taxis wait short of the shelter, and only where they may drive and stop.
-      if (!stopPickup(city, st)) continue;
-      const place = { id: st.id, label: `Остановка «${st.name}»`, lane: st.lane, s: Math.max(8, st.s - 20), x: st.x, z: st.z };
+      // Taxis wait short of the shelter (and of its bay), and only where they may drive and stop.
+      const s = stopPickupS(city, st);
+      if (s === null) continue;
+      const place = { id: st.id, label: `Остановка «${st.name}»`, lane: st.lane, s, x: st.x, z: st.z };
       this.places.set(st.id, place);
       pickupStops.push(st);
     }

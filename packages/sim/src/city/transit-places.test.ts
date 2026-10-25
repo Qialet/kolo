@@ -7,6 +7,8 @@ import { createRng } from '../rng.js';
 import { makeVehicle } from '../engine/traffic.js';
 import type { District } from './district.js';
 import { buildCityFromDistrict } from './district-build.js';
+import { buildingIndex } from './places.js';
+import { BAY_BACK, BAY_FWD, BAY_WIDTH, stopPickup, stopPickupS } from './transit-places.js';
 
 const REAL = new URL('../../../../data/districts/belgrade-center.json', import.meta.url);
 const district = JSON.parse(readFileSync(REAL, 'utf8')) as District;
@@ -104,7 +106,8 @@ describe('GTFS stops on curb lanes', () => {
       expect(along, raw.id).toBeGreaterThanOrEqual(Math.cos(Math.PI / 3) - 0.02);
       // Clamping s may slide the point a little along the lane.
       expect(dist(raw, p), raw.id).toBeLessThanOrEqual(30 + 10);
-      expect(dist(stop, p)).toBeLessThan(5);
+      // A shelter stands behind the kerb, and behind the bay where there is one.
+      expect(dist(stop, p)).toBeLessThan(stop.bay ? 5 + BAY_WIDTH : 5);
       expect(stop.name).toBe(raw.name);
       expect(stop.code).toBe(raw.code);
     }
@@ -135,6 +138,39 @@ describe('GTFS stops on curb lanes', () => {
     expect(city.busLines.find((l) => l.mode === 'trolley')).toBeDefined();
     expect(city.segments.filter((s) => s.trolley).length).toBeGreaterThan(50);
     expect(city.transit).toBe(transit);
+  });
+
+  it('gives a bay to the OSM bus bays and to boulevard stops with room behind the kerb', () => {
+    const road = city.busStops.filter((s) => !city.segments[city.lanes[s.lane]!.seg]!.rail);
+    const bays = road.filter((s) => s.bay);
+    const osm = new Set(transit.stops.filter((s) => s.bay).map((s) => s.id));
+    expect(bays.map((s) => s.name)).toEqual(expect.arrayContaining(['London', 'Admirala Geprata']));
+    expect(bays.length).toBeGreaterThanOrEqual(40);
+    expect(bays.length).toBeLessThanOrEqual(60);
+    const inBuilding = buildingIndex(city.buildings);
+    for (const stop of bays) {
+      const lane = city.lanes[stop.lane]!;
+      const seg = city.segments[lane.seg]!;
+      // Local streets get only the bays OSM maps; none on a lane shared with a track or a bus-only road.
+      if (!osm.has(stop.id)) expect(city.streets[seg.street]!.cls, stop.name).toBe('boulevard');
+      expect(lane.twins, stop.name).toBeUndefined();
+      expect(seg.psvOnly, stop.name).toBeUndefined();
+      expect(inBuilding(stop), stop.name).toBeUndefined();
+    }
+  });
+
+  it('keeps waiting taxis out of the bay', () => {
+    let pickups = 0;
+    for (const stop of city.busStops) {
+      const s = stopPickupS(city, stop);
+      expect(s !== null, stop.name).toBe(stopPickup(city, stop));
+      if (s === null) continue;
+      pickups++;
+      expect(s).toBeGreaterThanOrEqual(8);
+      // The taxi's body (front at s, 4.6 m long) ends short of the bay.
+      if (stop.bay) expect(s < stop.s - BAY_BACK || s - 4.6 > stop.s + BAY_FWD, stop.name).toBe(true);
+    }
+    expect(pickups).toBeGreaterThan(70);
   });
 
   it('sizes trolleybuses, minibuses and trams', () => {

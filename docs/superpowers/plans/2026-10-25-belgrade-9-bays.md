@@ -33,14 +33,14 @@
 
 ### Задача 1: bus_bay из OSM в файле района
 **Файлы:** packages/sim/src/import/bus-bays.ts (создать, + тест), import/district.ts, city/district.ts (DistrictStop.bay?: true), data/districts/belgrade-center.json.
-- [ ] Тест на фикстуре: путь с bus_bay=right, остановка справа по ходу — bay; против хода — нет; left на двустороннем — для обратного направления; oneway + left — нет; дальше 20 м — нет.
-- [ ] Реализация, pnpm import:district; в диффе файла только поля bay (2 остановки) и версия; коммит feat(sim): bus bays from OSM in the district import.
+- [x] Тест на фикстуре: путь с bus_bay=right, остановка справа по ходу — bay; против хода — нет; left на двустороннем — для обратного направления; oneway + left — нет; дальше 20 м — нет.
+- [x] Реализация, pnpm import:district; в диффе файла только поля bay (2 остановки) и версия; коммит feat(sim): bus bays from OSM in the district import.
 
 ### Задача 2: карман у остановки в городе
 **Файлы:** city/transit-places.ts (+ тест), city/types.ts (BusStop.bay?: true), engine/simulation.ts (место подачи), engine/demand.ts (если зависит от числа остановок подачи).
 **Интерфейсы:** константы BAY_BACK = 22, BAY_FWD = 7, BAY_WIDTH = 3, BAY_TAPER_IN = 8 — экспорт для сцены; stopPickupS(city, stop): number | null — место подачи (null — подачи нет), stopPickup через неё.
-- [ ] Тесты на полном файле: London и Admirala Geprata — с карманом; карманов 40–60; на местных улицах — только из OSM; ни одного на общей с трамваем полосе и psv-only; навес кармана за ним и не в здании; место подачи не в пределах кармана.
-- [ ] Реализация; записать число карманов и остановок подачи (было 89); тесты demand и simulation зелёные; коммит feat(sim): bus bays at stops.
+- [x] Тесты на полном файле: London и Admirala Geprata — с карманом; карманов 40–60; на местных улицах — только из OSM; ни одного на общей с трамваем полосе и psv-only; навес кармана за ним и не в здании; место подачи не в пределах кармана.
+- [x] Реализация: карманов 42 из 113, остановок подачи 82 (было 89: у 7 карман не оставляет места перед собой); в тесте цены поездки погашен случайный no-show (сдвиг потока rng); коммит feat(sim): bus bays at stops.
 
 ### Задача 3: автобус в кармане и в полосе
 **Файлы:** engine/transit-net.ts (NetStop.bay), engine/transit.ts, engine/traffic.ts (плавный въезд), engine/transit.test.ts или traffic.test.ts (фикстуры).

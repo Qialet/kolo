@@ -2,7 +2,7 @@ import { poseAlong, type Vec2 } from '../geometry.js';
 import { segmentDistance } from '../import/polygons.js';
 import type { DistrictStop, DistrictTransit } from './district.js';
 import { lanePoint } from './lanes.js';
-import { SegmentGrid } from './places.js';
+import { buildingIndex, roadSurface, SegmentGrid } from './places.js';
 import type { BusStop, City, Lane } from './types.js';
 
 const STOP_REACH = 30;
@@ -18,6 +18,33 @@ const SHELTER_BEHIND_KERB = 1.6;
 const PLATFORM_OFFSET = 2.6;
 const PLATFORM_HALF_WIDTH = 1.1;
 const PLATFORM_LENGTH = 30;
+
+/**
+ * A bus bay cut into the sidewalk at a stop: from BAY_BACK metres short of the stop point (the bus's front)
+ * to BAY_FWD past it, BAY_WIDTH wide beyond the kerb; the entry tapers over BAY_TAPER_IN, the exit over BAY_FWD.
+ */
+export const BAY_BACK = 22;
+export const BAY_FWD = 7;
+export const BAY_WIDTH = 3;
+export const BAY_TAPER_IN = 8;
+/** Sidewalk kept clear behind a bay: the shelter stands there. */
+const BAY_WALK = 1.6;
+
+/**
+ * Whether a bay fits at a curb stop: inside its lane, with no building on the bay or the sidewalk behind it
+ * and no other road on the bay.
+ */
+function bayFits(city: City, lane: Lane, s: number, inBuilding: (p: Vec2) => string | undefined, onRoad: (p: Vec2) => boolean): boolean {
+  if (s - BAY_BACK < 0 || s + BAY_FWD > lane.length) return false;
+  const kerb = city.streets[city.segments[lane.seg]!.street]!.laneWidth / 2;
+  for (let at = s - BAY_BACK; at <= s + BAY_FWD; at += 2) {
+    for (const off of [0.5, BAY_WIDTH / 2, BAY_WIDTH, BAY_WIDTH + BAY_WALK]) {
+      const p = lanePoint(city, lane.id, at, kerb + off);
+      if (inBuilding(p) || (off <= BAY_WIDTH && onRoad(p))) return false;
+    }
+  }
+  return true;
+}
 
 /** Every street lane above ground, for keeping tram platforms off them. */
 function streetLanes(city: City): SegmentGrid<number> {
@@ -89,11 +116,27 @@ export function bindStop(grid: SegmentGrid<{ lane: Lane; s0: number }>, stop: Di
 /** Shortest curb lane a stop pick-up point fits on (8 m clear at both ends, 20 m short of the shelter). */
 const PICKUP_LANE = 32;
 
-/** Whether taxis can pull up at a stop: a long enough curb lane of the core network that cars may use. */
-export function stopPickup(city: City, stop: BusStop): boolean {
+/** Taxis wait this far short of the shelter, or of the bay where there is one. */
+const PICKUP_SHORT = 20;
+const PICKUP_SHORT_OF_BAY = 6;
+const PICKUP_MIN_S = 8;
+
+/**
+ * Where taxis pull up at a stop (s on its lane), or null when they cannot: the curb lane must be a long enough
+ * lane of the core network that cars may use, and a taxi never stands in a bay.
+ */
+export function stopPickupS(city: City, stop: BusStop): number | null {
   const lane = city.lanes[stop.lane]!;
   const seg = city.segments[lane.seg]!;
-  return !!seg.core && !seg.psvOnly && lane.length >= PICKUP_LANE;
+  if (!seg.core || seg.psvOnly || lane.length < PICKUP_LANE) return null;
+  if (!stop.bay) return Math.max(PICKUP_MIN_S, stop.s - PICKUP_SHORT);
+  const s = stop.s - BAY_BACK - PICKUP_SHORT_OF_BAY;
+  return s >= PICKUP_MIN_S ? s : null;
+}
+
+/** Whether taxis can pull up at a stop (see stopPickupS). */
+export function stopPickup(city: City, stop: BusStop): boolean {
+  return stopPickupS(city, stop) !== null;
 }
 
 /**
@@ -116,6 +159,8 @@ export function addTransit(city: City, transit: DistrictTransit) {
   const curbs = curbLanes(city);
   const tracks = curbLanes(city, true);
   const streets = streetLanes(city);
+  const inBuilding = buildingIndex(city.buildings);
+  const onRoad = roadSurface(city);
   transit.stops.forEach((raw, i) => {
     const curb = byRoad.has(i) ? bindStop(curbs, raw) : null;
     const rail = byTram.has(i) ? bindStop(tracks, raw, TRAM_STOP_REACH) : null;
@@ -123,7 +168,15 @@ export function addTransit(city: City, transit: DistrictTransit) {
     if (!hit) return;
     const pose = poseAlong(hit.lane.line, hit.s);
     const platform = curb ? undefined : platformSide(streets, hit.lane, hit.s);
-    const behind = curb ? city.streets[city.segments[hit.lane.seg]!.street]!.laneWidth / 2 + SHELTER_BEHIND_KERB : (platform ?? PLATFORM_OFFSET);
+    let bay = false;
+    if (curb) {
+      const seg = city.segments[curb.lane.seg]!;
+      // OSM bays everywhere; guessed ones only on boulevards, never over a track or on a bus-only road.
+      const guess = city.streets[seg.street]!.cls === 'boulevard' && !curb.lane.twins && !seg.psvOnly;
+      bay = !!raw.bay || (guess && bayFits(city, curb.lane, curb.s, inBuilding, onRoad));
+    }
+    const kerb = curb ? city.streets[city.segments[hit.lane.seg]!.street]!.laneWidth / 2 : 0;
+    const behind = curb ? kerb + (bay ? BAY_WIDTH : 0) + SHELTER_BEHIND_KERB : (platform ?? PLATFORM_OFFSET);
     const at = lanePoint(city, hit.lane.id, hit.s, behind);
     const stop: BusStop = {
       id: raw.id,
@@ -136,6 +189,7 @@ export function addTransit(city: City, transit: DistrictTransit) {
       heading: pose.heading,
       lines: [...linesAt[i]!],
     };
+    if (bay) stop.bay = true;
     if (rail) stop.rail = { lane: rail.lane.id, s: rail.s };
     if (platform !== undefined) stop.platform = platform;
     city.busStops.push(stop);
