@@ -81,6 +81,26 @@ export function poseAlong(line: Polyline, s: number, lateral = 0): Pose {
   return { x: a.x + d.x * t - d.z * lateral, z: a.z + d.z * t + d.x * lateral, heading: Math.atan2(d.x, d.z) };
 }
 
+/** Arc length of the point of `line` nearest to `p`. */
+export function projectOnPolyline(line: Polyline, p: Vec2): number {
+  const { points, cum } = line;
+  let best = 0;
+  let bestD = Infinity;
+  for (let i = 1; i < points.length; i++) {
+    const a = points[i - 1] as Vec2;
+    const b = points[i] as Vec2;
+    const segLen = (cum[i] as number) - (cum[i - 1] as number);
+    const t = segLen > 0 ? Math.max(0, Math.min(segLen, ((p.x - a.x) * (b.x - a.x) + (p.z - a.z) * (b.z - a.z)) / segLen)) : 0;
+    const k = segLen > 0 ? t / segLen : 0;
+    const d = Math.hypot(a.x + (b.x - a.x) * k - p.x, a.z + (b.z - a.z) * k - p.z);
+    if (d < bestD) {
+      bestD = d;
+      best = (cum[i - 1] as number) + t;
+    }
+  }
+  return best;
+}
+
 /** Unit direction of a polyline at its start / end. */
 export const startTangent = (line: Polyline): Vec2 => norm(sub(line.points[1]!, line.points[0]!));
 export const endTangent = (line: Polyline): Vec2 => norm(sub(line.points[line.points.length - 1]!, line.points[line.points.length - 2]!));

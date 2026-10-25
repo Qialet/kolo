@@ -2,7 +2,7 @@ import { isTransitKind, type LightMode, type VehicleKind } from '@kolo/contracts
 import { twinPos } from '../city/corridors.js';
 import { lanePoint } from '../city/lanes.js';
 import type { City, Connector, CurbRef, Lane, Segment } from '../city/types.js';
-import { dist, dot, polyline, poseAlong, poseAt, type Polyline, type Pose, type Vec2 } from '../geometry.js';
+import { dist, dot, polyline, poseAlong, poseAt, projectOnPolyline, type Polyline, type Pose, type Vec2 } from '../geometry.js';
 import type { Rng } from '../rng.js';
 import { yieldsTo } from './priority.js';
 import { chooseLanes, laneIndexesFor, routeSegments, turnBetween } from './routing.js';
@@ -58,6 +58,10 @@ export interface Vehicle {
   stoppedFor: number;
   /** Lane at whose stop sign the vehicle has made its full stop (-1: not yet). */
   lineStop: number;
+  /** Lane a lane change started from while the body is still sliding across (-1: not changing lanes). */
+  changeFrom: number;
+  /** Position on changeFrom minus position on the current lane during that change. */
+  changeShift: number;
   /** Long vehicles: junction curves left behind (odometer when the front left them), held while the body still covers them. */
   tail: { conn: number; at: number }[];
 }
@@ -79,6 +83,8 @@ const STOP_DWELL = 1;
 const STOP_REACH = 4;
 /** A vehicle this close behind another one's tail queues behind it. */
 const QUEUE_BEHIND = 20;
+/** While further than this from its new lane, a vehicle changing lanes still blocks its old one. */
+const CHANGE_STRADDLE = 0.8;
 
 export function makeDriver(rng: Rng, kind: VehicleKind): DriverProfile {
   if (kind === 'TRAM') return { v0Factor: rng.range(0.9, 0.95), aMax: 1.0, bComf: 1.5, headway: 2.0, minGap: 3 };
@@ -137,6 +143,8 @@ export function makeVehicle(id: string, kind: VehicleKind, rng: Rng, long = fals
     odometer: 0,
     stoppedFor: 0,
     lineStop: -1,
+    changeFrom: -1,
+    changeShift: 0,
     tail: [],
   };
 }
@@ -258,6 +266,7 @@ export class TrafficSystem {
     v.stop = null;
     v.committed = -1;
     v.lineStop = -1;
+    v.changeFrom = -1;
     v.tail.length = 0;
     this.updatePose(v);
   }
@@ -269,6 +278,7 @@ export class TrafficSystem {
     v.speed = 0;
     v.path = [];
     v.tail.length = 0;
+    v.changeFrom = -1;
     v.stop = null;
     v.pose = { ...pose };
   }
@@ -276,6 +286,7 @@ export class TrafficSystem {
   startYard(v: Vehicle, points: Vec2[], end: 'parked' | 'pulled', endLane = -1, endS = 0) {
     v.mode = 'yard';
     v.tail.length = 0;
+    v.changeFrom = -1;
     v.yard = polyline(points);
     v.yardEnd = end;
     v.s = 0;
@@ -289,6 +300,44 @@ export class TrafficSystem {
     v.lateral = end === 'pulled' ? v.pullOffset : 0;
     v.lateralTarget = v.lateral;
     v.yardEndS = endS;
+  }
+
+  /**
+   * Moves a vehicle driving on a lane to the neighbouring lane `toLane` of the same segment: the rest of its
+   * path is re-planned from there over the same segments. False (and nothing changes) when the rest cannot be
+   * driven from that lane, or it would leave the lane of a stop on this segment. The body then slides across.
+   */
+  changeLane(v: Vehicle, toLane: number): boolean {
+    const { city } = this;
+    if (v.mode !== 'lane' || v.changeFrom >= 0 || toLane === v.lane) return false;
+    const from = city.lanes[v.lane]!;
+    const to = city.lanes[toLane]!;
+    if (to.seg !== from.seg || Math.abs(to.index - from.index) !== 1) return false;
+    const segs = v.path.slice(v.pathIdx).map((step) => city.lanes[step.lane]!.seg);
+    const finalLane = v.stop ? v.stop.lane : -1;
+    let rest: PathStep[] = [];
+    if (segs.length === 1) {
+      if (finalLane >= 0 && finalLane !== toLane) return false;
+    } else {
+      const found = chooseLanes(city, segs, toLane, finalLane, laneIndexesFor(city, segs, v.straightPreference, v.stop ? 'curb' : 'any'));
+      if (!found) return false;
+      rest = found;
+    }
+    const s = projectOnPolyline(to.line, lanePoint(city, from.id, v.s));
+    v.path = [...v.path.slice(0, v.pathIdx), { lane: toLane, conn: v.path[v.pathIdx]!.conn }, ...rest];
+    v.changeFrom = from.id;
+    v.changeShift = v.s - s;
+    v.lane = toLane;
+    v.s = s;
+    v.lateral = from.offset - to.offset;
+    v.lateralTarget = 0;
+    v.committed = -1;
+    v.lineStop = -1;
+    // Counted at once: a vehicle deciding later in this step must see it on its new lane.
+    this.occupy(toLane, v, s);
+    this.occ[toLane]!.sort((a, b) => a.pos - b.pos);
+    this.updatePose(v);
+    return true;
   }
 
   /** Free curb space check before a pulled-over vehicle merges back. */
@@ -384,9 +433,11 @@ export class TrafficSystem {
       }
       if (v.lateral !== v.lateralTarget) {
         const d = v.lateralTarget - v.lateral;
-        const stepL = Math.sign(d) * Math.min(Math.abs(d), 1.7 * dt);
-        v.lateral += stepL;
+        // A lane change slides slower than a pull to the kerb, and slower still at low speed.
+        const rate = v.changeFrom >= 0 ? Math.min(1.2, 0.35 + 0.3 * v.speed) : 1.7;
+        v.lateral += Math.sign(d) * Math.min(Math.abs(d), rate * dt);
       }
+      if (v.changeFrom >= 0 && v.lateral === v.lateralTarget) v.changeFrom = -1;
       v.stoppedFor = v.speed < 0.3 && (v.mode === 'lane' || v.mode === 'conn') ? v.stoppedFor + dt : 0;
       this.updatePose(v);
     }
@@ -402,6 +453,7 @@ export class TrafficSystem {
       // A tram at its stop stands in the lane (no pull to the kerb): it still blocks the lane.
       if (v.mode === 'lane' || (v.mode === 'pulled' && v.pullOffset === 0)) {
         this.occupy(v.lane, v, v.s);
+        if (v.changeFrom >= 0 && Math.abs(v.lateral) > CHANGE_STRADDLE) this.occupy(v.changeFrom, v, v.s + v.changeShift);
         if (v.mode === 'lane' && v.committed >= 0) this.connBusy[v.committed]!++;
         if (v.mode === 'lane' && v.stoppedFor > STARVING) this.starving[city.segments[city.lanes[v.lane]!.seg]!.to] = 1;
       } else if (v.mode === 'conn') {
@@ -472,6 +524,12 @@ export class TrafficSystem {
     }
     const leader = this.leaderOn(step.lane, pos, v);
     if (leader) consider(leader.pos - leader.v.length - pos, leader.v.speed);
+    // Half across: whoever is ahead on the old lane still counts.
+    if (v.mode === 'lane' && v.changeFrom >= 0 && Math.abs(v.lateral) > CHANGE_STRADDLE) {
+      const oldPos = pos + v.changeShift;
+      const lo = this.leaderOn(v.changeFrom, oldPos, v);
+      if (lo) consider(lo.pos - lo.v.length - oldPos, lo.v.speed);
+    }
 
     const toEnd = lane.length - pos;
     if (!next) v.pathEnded = true;
@@ -647,6 +705,7 @@ export class TrafficSystem {
         v.mode = 'pulled';
         v.speed = 0;
         v.lateralTarget = v.pullOffset;
+        v.changeFrom = -1;
         v.arrived = true;
         v.stop = null;
         return;
@@ -661,6 +720,8 @@ export class TrafficSystem {
           v.pathIdx++;
           v.committed = -1;
           v.lineStop = -1;
+          v.changeFrom = -1;
+          v.lateral = v.lateralTarget = 0;
         } else {
           v.s = lane.length - 0.01;
           v.speed = 0;
