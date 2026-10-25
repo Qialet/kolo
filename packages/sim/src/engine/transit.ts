@@ -4,8 +4,8 @@ import type { City } from '../city/types.js';
 import type { Rng } from '../rng.js';
 import { belgradeTime, serviceFor } from '../transit/calendar.js';
 import { chooseLanes, laneIndexesFor } from './routing.js';
-import { fixedLength, makeVehicle, type PathStep, type TrafficSystem, type Vehicle } from './traffic.js';
-import type { NetPattern, TransitNet } from './transit-net.js';
+import { BAY_PULL, fixedLength, makeVehicle, type PathStep, type TrafficSystem, type Vehicle } from './traffic.js';
+import type { NetPattern, NetStop, TransitNet } from './transit-net.js';
 
 const KIND: Record<TransitMode, VehicleKind> = { bus: 'BUS', trolley: 'TROLLEY', minibus: 'MINIBUS', tram: 'TRAM' };
 /** A trip starting at a terminus inside the frame shows up this long before its departure. */
@@ -28,6 +28,8 @@ const EXIT_ROOM = 8;
 /** Vehicles queuing for a stop stand this far apart. */
 const BERTH_GAP = 1.5;
 const BERTH_MIN = 2;
+/** A bay holds one vehicle: whoever berths further than this short of the pole stands in the lane behind it. */
+const BAY_BERTH = 2;
 const NOON = 43_200;
 /** Trips in progress are looked up this far back when the clock jumps. */
 const LOOKBACK = 3 * 3600;
@@ -227,7 +229,7 @@ export class Transit {
     if (!this.traffic.isLaneFree(stop.lane, stop.s, roomFor(lengthOf(t), PLACE_ROOM))) return false;
     const trip = this.create(t, 1, 'dwell', p.stops[0]!.segIdx);
     trip.dwellUntil = this.departureAt(t, 0);
-    this.traffic.placeOnLane(trip.v, stop.lane, stop.s, true);
+    this.standAt(trip.v, stop);
     return true;
   }
 
@@ -286,7 +288,11 @@ export class Transit {
       const p = trip.pattern;
       if (trip.phase === 'drive') {
         const berth = v.stop && !v.arrived ? this.berth(trip, v.stop.lane, pulled) : 0;
-        if (v.stop && berth !== null) v.stop.s = berth;
+        if (v.stop && berth !== null) {
+          v.stop.s = berth;
+          const at = p.stops[trip.next]!;
+          if (v.kind !== 'TRAM') v.pullOffset = at.bay && berth >= at.s - BAY_BERTH ? BAY_PULL : 0;
+        }
         if (v.arrived) {
           v.arrived = false;
           this.arrive(trip, clockMs);
@@ -300,7 +306,7 @@ export class Transit {
           else if (!this.planLeg(trip)) this.finish(trip);
         }
       } else if (trip.phase === 'dwell') {
-        // Early on the timetable, a tram stops holding its stop for the tram or car queued behind it.
+        // Early on the timetable, a vehicle standing in its lane stops holding its stop for whoever queues behind it.
         if (clockMs < trip.dwellUntil && (clockMs < trip.boardUntil || v.pullOffset !== 0 || !this.traffic.queuedBehind(v))) continue;
         const k = trip.next - 1;
         if (trip.next >= p.stops.length && p.exitSeg < 0) {
@@ -345,7 +351,7 @@ export class Transit {
     }
     const late = (clockMs - this.departureAt(trip, k)) / 1000;
     const dwell = clockMs + this.rng.range(15, 30) * 1000;
-    // A tram standing over a lane cars share does not hold for its time: it would block the street.
+    // A tram (or a bus) standing over a lane cars and trams share does not hold for its time: it would block the street.
     const v = trip.v;
     const blocking = v.pullOffset === 0 && (this.city.lanes[v.lane]!.twins ?? []).some((t) => v.s >= t.s0 && v.s - v.length <= t.s1);
     trip.dwellUntil = late > LATE ? clockMs + this.rng.range(8, 12) * 1000 : blocking ? dwell : Math.max(dwell, this.departureAt(trip, k));
@@ -442,7 +448,13 @@ export class Transit {
     if (!this.traffic.isLaneFree(stop.lane, stop.s, roomFor(lengthOf(t), PLACE_ROOM))) return;
     const trip = this.create(t, k + 1, 'dwell', t.pattern.stops[k]!.segIdx);
     trip.dwellUntil = until;
-    this.traffic.placeOnLane(trip.v, stop.lane, stop.s, true);
+    this.standAt(trip.v, stop);
+  }
+
+  /** Puts a new vehicle at a stop: in its bay, or standing in the lane where there is none. */
+  private standAt(v: Vehicle, stop: NetStop) {
+    if (v.kind !== 'TRAM') v.pullOffset = stop.bay ? BAY_PULL : 0;
+    this.traffic.placeOnLane(v, stop.lane, stop.s, true);
   }
 }
 

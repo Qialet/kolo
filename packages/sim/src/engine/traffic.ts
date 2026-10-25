@@ -93,6 +93,10 @@ const CHANGE_STRADDLE = 0.8;
 /** Turn signals go on this far before a turn at a junction, and before the vehicle's own stop at the kerb. */
 const SIGNAL_AHEAD = 35;
 const SIGNAL_STOP = 30;
+/** A bus in a bay stands this far right of its lane's centre (the bay is 3 m wide beyond the kerb). */
+export const BAY_PULL = 3.1;
+/** Over its last metres to the stop a bus heading into a bay drifts across in step with the distance left. */
+const BAY_ENTRY = 12;
 
 export function makeDriver(rng: Rng, kind: VehicleKind): DriverProfile {
   if (kind === 'TRAM') return { v0Factor: rng.range(0.9, 0.95), aMax: 1.0, bComf: 1.5, headway: 2.0, minGap: 3, politeness: 0.5 };
@@ -141,7 +145,7 @@ export function makeVehicle(id: string, kind: VehicleKind, rng: Rng, long = fals
     lateral: 0,
     lateralTarget: 0,
     // A tram stops on its track.
-    pullOffset: kind === 'TRAM' ? 0 : isTransitKind(kind) ? 3.1 : 2.5,
+    pullOffset: kind === 'TRAM' ? 0 : isTransitKind(kind) ? BAY_PULL : 2.5,
     yard: null,
     yardEnd: 'parked',
     yardEndS: 0,
@@ -384,7 +388,9 @@ export class TrafficSystem {
 
   /**
    * Seconds a vehicle may stand before it counts as stuck: a cycle plus 30 s when it is first at a
-   * red stop line (a four-phase light keeps one approach red for over two minutes), else 120 s.
+   * red stop line (a four-phase light keeps one approach red for over two minutes); held at the line by
+   * a queue on the lane ahead that ends at a light, that light's cycle plus 30 s plus a minute for the
+   * queue to drain; else 120 s.
    */
   waitLimit(v: Vehicle): number {
     const next = v.path[v.pathIdx + 1];
@@ -392,7 +398,17 @@ export class TrafficSystem {
     const c = this.city.connectors[next.conn]!;
     const sig = this.signals[c.node];
     const aspect = this.signalStates[c.node]?.aspects[c.phase];
-    return sig && (aspect === 'RED' || aspect === 'RED_AMBER') ? Math.max(120, cycleOf(sig.plan) + 30) : 120;
+    if (sig && (aspect === 'RED' || aspect === 'RED_AMBER')) return Math.max(120, cycleOf(sig.plan) + 30);
+    const ahead = this.signals[this.city.segments[this.city.lanes[c.to]!.seg]!.to];
+    return ahead && this.boxBlocked(v, c) ? Math.max(120, cycleOf(ahead.plan) + 90) : 120;
+  }
+
+  /** A queue on the lane behind connector `c` reaches back to its start: entering would block the junction. */
+  private boxBlocked(v: Vehicle, c: Connector): boolean {
+    for (const e of this.occ[c.to]!) {
+      if (e.pos - e.v.length < v.length + 2 && e.pos > -1 && e.v.speed < 2) return true;
+    }
+    return false;
   }
 
   /**
@@ -444,6 +460,10 @@ export class TrafficSystem {
           v.wantsDepart = false;
           v.lateralTarget = 0;
         }
+      }
+      if (v.mode === 'lane' && v.stop && v.changeFrom < 0 && isTransitKind(v.kind)) {
+        const left = v.stop.lane === v.lane ? v.stop.s - v.s : Infinity;
+        v.lateralTarget = left < BAY_ENTRY ? v.pullOffset * Math.min(1, 1 - Math.max(0, left) / BAY_ENTRY) : 0;
       }
       if (v.lateral !== v.lateralTarget) {
         const d = v.lateralTarget - v.lateral;
@@ -630,9 +650,7 @@ export class TrafficSystem {
     // Something already in (or committed to) a crossing path.
     for (const k of c.conflicts) if (this.connBusy[k]! > 0) return false;
     // Do not block the box: a queue reaching back to the exit.
-    for (const e of this.occ[c.to]!) {
-      if (e.pos - e.v.length < v.length + 2 && e.pos > -1 && e.v.speed < 2) return false;
-    }
+    if (this.boxBlocked(v, c)) return false;
     if (this.starving[node.id] && this.starvingCrosser(v, node.in, c)) return false;
     // After a long wait at the line a driver stops yielding to traffic that is not actually moving
     // in (crossing paths are still checked above): breaks mutual-yield deadlocks.

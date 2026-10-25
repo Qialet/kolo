@@ -160,6 +160,38 @@ describe('timetable transit', () => {
     expect(trips.every((t) => t.service === 'N')).toBe(true);
   });
 
+  it('pulls buses into bays and keeps them in their lane elsewhere, one per bay', () => {
+    const traffic = new TrafficSystem(city);
+    const transit = new Transit(traffic, net, createRng(9));
+    transit.rebuild(WEEKDAY_1530);
+    let inBay = 0;
+    let inLane = 0;
+    for (let ms = WEEKDAY_1530; ms < WEEKDAY_1530 + 600_000; ms += 50) {
+      traffic.step(0.05);
+      transit.step(ms);
+      if ((ms - WEEKDAY_1530) % 1000) continue;
+      transit.update(ms);
+      const bays = new Map<number, Vehicle[]>();
+      for (const trip of transit.trips.values()) {
+        const v = trip.v;
+        if (trip.phase !== 'dwell' || v.mode !== 'pulled' || v.kind === 'TRAM') continue;
+        const stop = trip.pattern.stops[trip.next - 1]!;
+        if (v.pullOffset > 0) {
+          inBay++;
+          expect(stop.bay, v.id).toBe(true);
+          bays.set(v.lane, [...(bays.get(v.lane) ?? []), v]);
+        } else inLane++;
+      }
+      for (const list of bays.values()) {
+        list.sort((a, b) => a.s - b.s);
+        for (let k = 1; k < list.length; k++) expect(list[k]!.s - list[k]!.length, list[k]!.id).toBeGreaterThan(list[k - 1]!.s);
+      }
+    }
+    // Both kinds of stop are busy at a weekday afternoon.
+    expect(inBay).toBeGreaterThan(500);
+    expect(inLane).toBeGreaterThan(500);
+  });
+
   it('holds a trip at a blocked frame entry, then gives it up after 120 s', () => {
     const traffic = new TrafficSystem(city);
     const transit = new Transit(traffic, net, createRng(3));

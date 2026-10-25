@@ -19,6 +19,8 @@ export interface NetStop {
   at: number;
   /** Lane of the stop's segment the vehicle merges into when it leaves (the stop lane unless it must turn off another one). */
   departLane: number;
+  /** A bay to pull into (city BusStop.bay); without one the vehicle stops in its lane. */
+  bay: boolean;
 }
 
 /** A district pattern laid over the road graph. */
@@ -132,7 +134,8 @@ export function buildTransitNet(city: City, transit: DistrictTransit): TransitNe
       mode: city.busLines[line]!.mode,
       segs,
       segAt,
-      stops: stops.map((st) => ({ ...st, at: segAt[st.segIdx]! + st.s })),
+      // Buses pull into a bay; trams stop on their track.
+      stops: stops.map((st) => ({ ...st, at: segAt[st.segIdx]! + st.s, bay: !rail && !!city.busStops[st.stop]!.bay })),
       entryLane,
       exitSeg,
       length,
@@ -152,7 +155,7 @@ export function buildTransitNet(city: City, transit: DistrictTransit): TransitNe
  */
 function layPattern(city: City, bound: { timeIdx: number; stop: number; at: CurbRef }[], entryCurb: number, exitSeg: number, cost: SegmentCost) {
   const segs: number[] = [];
-  const stops: Omit<NetStop, 'at'>[] = [];
+  const stops: Omit<NetStop, 'at' | 'bay'>[] = [];
   /** Where legs start: the entry (stop -1) or a stop kept, with the length of segs before its own leg. */
   const anchors: { lane: number; s: number; segsBefore: number; stop: number }[] = [];
   let entryLane = -1;

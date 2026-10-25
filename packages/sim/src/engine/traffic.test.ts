@@ -4,6 +4,7 @@ import { district, segOf } from '../city/district.fixture.js';
 import { buildCityFromDistrict } from '../city/district-build.js';
 import type { City } from '../city/types.js';
 import { createRng } from '../rng.js';
+import { cycleOf } from './signals.js';
 import { makeVehicle, TrafficSystem, type Vehicle } from './traffic.js';
 
 const res: Partial<RoadEdge> = { cls: 'residential' };
@@ -147,5 +148,89 @@ describe('right of way at unsignalised junctions', () => {
     const tramWatch: Watch = { v: t, entered: Infinity, minSpeed: 8, atLine: 0 };
     run(traffic, city, [eastbound, tramWatch], 30);
     expect(tramWatch.entered).toBeLessThan(eastbound.entered);
+  });
+});
+
+describe('buses at stops', () => {
+  /** A bus 10 m into the west arm with its stop 70 m in, and a car right behind it, both heading east. */
+  function approach(pullOffset: number) {
+    const city = plusCity();
+    const traffic = new TrafficSystem(city);
+    const lane = segOf(city, W, [0, 0]).lanes[0]!;
+    const bus = makeVehicle('bus', 'BUS', createRng(3));
+    bus.pullOffset = pullOffset;
+    traffic.add(bus);
+    traffic.placeOnLane(bus, lane, 22);
+    expect(traffic.planTo(bus, { lane, s: 70 })).toBe(true);
+    bus.speed = 8;
+    const car = makeVehicle('car', 'CAR', createRng(4));
+    traffic.add(car);
+    traffic.placeOnLane(car, lane, 6);
+    expect(traffic.planTo(car, { seg: segOf(city, [0, 0], E).id })).toBe(true);
+    car.speed = 8;
+    let pulledAt = -1;
+    let maxStep = 0;
+    let carStood = 0;
+    for (let t = 0; t < 40; t += 0.05) {
+      const lateral = bus.lateral;
+      traffic.step(0.05);
+      maxStep = Math.max(maxStep, Math.abs(bus.lateral - lateral));
+      if (bus.mode === 'pulled' && pulledAt < 0) pulledAt = bus.lateral;
+      // Only behind the bus: at the end of its path the car stops for good.
+      if (car.mode === 'lane' && car.lane === lane) carStood = Math.max(carStood, car.stoppedFor);
+    }
+    return { bus, car, pulledAt, maxStep, carStood };
+  }
+
+  it('drift into a bay on the way in and let the car behind go by', () => {
+    const { bus, car, pulledAt, maxStep, carStood } = approach(3.1);
+    expect(bus.mode).toBe('pulled');
+    expect(bus.lateral).toBeCloseTo(3.1, 5);
+    // Already well into the bay when it stops: the body slid over the last metres, not in place.
+    expect(pulledAt).toBeGreaterThan(1.5);
+    expect(maxStep).toBeLessThan(0.3);
+    expect(carStood).toBeLessThan(3);
+    expect(car.lane === bus.lane ? car.s - car.length > bus.s : true).toBe(true);
+  });
+
+  it('stand in the lane without a bay: the car behind waits on a one-lane street', () => {
+    const { bus, car, maxStep, carStood } = approach(0);
+    expect(bus.mode).toBe('pulled');
+    expect(bus.lateral).toBe(0);
+    expect(maxStep).toBe(0);
+    expect(car.lane).toBe(bus.lane);
+    expect(car.s).toBeLessThan(bus.s - bus.length);
+    expect(carStood).toBeGreaterThan(10);
+  });
+});
+
+describe('waitLimit', () => {
+  /** West arm into an unsignalised T at (-100, 0), then on to a light at the origin. */
+  const chain = () =>
+    buildCityFromDistrict(
+      district(
+        [[0, 0, { signals: true }], [-100, 0], [-200, 0, { boundary: true }], [-100, -100, { boundary: true }], [100, 0, { boundary: true }], [0, -100, { boundary: true }]],
+        [[2, 1], [1, 0], [3, 1, res], [0, 4], [5, 0]],
+      ),
+    );
+
+  it('waits for a light ahead when a queue from it holds the junction', () => {
+    const city = chain();
+    const traffic = new TrafficSystem(city);
+    const light = city.nodes.find((n) => n.signal)!;
+    const into = segOf(city, [-100, 0], [0, 0]).lanes[0]!;
+    const from = city.lanes[segOf(city, [-200, 0], [-100, 0]).lanes[0]!]!;
+    const v = makeVehicle('held', 'CAR', createRng(1));
+    traffic.add(v);
+    traffic.placeOnLane(v, from.id, from.length - 1);
+    expect(traffic.planTo(v, { seg: segOf(city, [0, 0], E).id })).toBe(true);
+    traffic.step(0.05);
+    expect(traffic.waitLimit(v)).toBe(120);
+    const queue = makeVehicle('queue', 'CAR', createRng(2));
+    traffic.add(queue);
+    traffic.placeOnLane(queue, into, 6);
+    traffic.step(0.05);
+    expect(v.mode).toBe('lane');
+    expect(traffic.waitLimit(v)).toBe(Math.max(120, cycleOf(traffic.signals[light.id]!.plan) + 90));
   });
 });
