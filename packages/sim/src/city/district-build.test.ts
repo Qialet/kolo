@@ -220,6 +220,10 @@ describe('buildCityFromDistrict on Belgrade', () => {
     expect(audit.stripEndsOffJunction.length).toBeLessThanOrEqual(3);
     expect(audit.buildingsUnderPads.length).toBeLessThanOrEqual(2);
     expect(audit.connectorsOffAsphalt.length).toBeLessThanOrEqual(25);
+    // Before tapers, rounded bends and S-bends: 6 pinched bends, 426 kinks and 52 connectors running backwards.
+    expect(audit.stripSharpBends).toHaveLength(0);
+    expect(audit.backwardConnectors).toHaveLength(0);
+    expect(audit.connectorKinks.length).toBeLessThanOrEqual(15);
     const pads = new Set(city.pads.map((p) => p.node));
     for (const n of city.nodes) if (!n.boundary && n.radius > 0 && n.in.length + n.out.length >= 3 && n.in.some((s) => !city.segments[s]!.rail)) expect(pads.has(n.id), n.name).toBe(true);
   });

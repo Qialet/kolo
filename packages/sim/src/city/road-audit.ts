@@ -108,6 +108,8 @@ export function auditRoads(city: City, district: District): RoadAudit {
     const lp = from.line.points;
     const tp = to.line.points;
     const k = Math.max(angleBetween(dir(lp[lp.length - 2]!, lp[lp.length - 1]!), dir(cp[0]!, cp[1]!)), angleBetween(dir(cp[cp.length - 2]!, cp[cp.length - 1]!), dir(tp[0]!, tp[1]!)));
+    // A connector shorter than this has no direction of its own to kink with.
+    if (c.line.length < 0.3) continue;
     const note = `${rail(c.from) ? 'track ' : ''}${c.turn} ${street(from.seg)} → ${street(to.seg)}`;
     if (k > BACKWARD) audit.backwardConnectors.push(at(cp[0]!, k, note));
     else if (k > KINK) audit.connectorKinks.push(at(cp[0]!, k, note));

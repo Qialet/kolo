@@ -1,6 +1,7 @@
 import {
   add,
   cross,
+  cubicBezier,
   dist,
   dot,
   endTangent,
@@ -37,6 +38,13 @@ const RING_TINY = 8;
 /** Length over which a segment's entry / exit direction is measured. */
 const TANGENT_SPAN = 15;
 const CONFLICT_CLEARANCE = 1.6;
+/** Bends of a road sharper than this are rounded off (a single OSM corner node would pinch the asphalt). */
+const ROUND_BEND = (35 * Math.PI) / 180;
+/** Centre-line radius of a rounded bend, unless the road pieces around it are too short. */
+const BEND_RADIUS = 8;
+/** Junction circle radius per metre of kerb shift where a road changes width: a taper of 1 in 8. */
+const TAPER = 4;
+const TAPER_MAX = 15;
 /** OSM puts signal nodes on the approach, up to this far outside the junction circle. */
 const SIGNAL_REACH = 25;
 /** |cos| above which two approaches share a phase (opposite or parallel within 30°). */
@@ -206,6 +214,8 @@ export function buildCityFromDistrict(district: District): City {
     return s;
   };
 
+  for (const e of edges.values()) if (e.src.cls !== 'tram') e.pts = roundCorners(e.pts);
+
   // ── segments ──
   interface SegInfo {
     edge: WorkEdge;
@@ -264,6 +274,36 @@ export function buildCityFromDistrict(district: District): City {
     segOfEdge.set(e.id, pair);
   }
 
+  /** Paved width left and right of a road looking out of the node along it. */
+  const widthsOut = (node: CityNode, e: WorkEdge): [number, number] => {
+    const pair = segOfEdge.get(e.id)!;
+    const out = [pair.fwd, pair.bwd].find((s) => s?.from === node.id);
+    const back = [pair.fwd, pair.bwd].find((s) => s?.to === node.id);
+    const w = laneWidthOf(e.src.cls);
+    if (out && back) return [info[back.id]!.lanes * w, info[out.id]!.lanes * w];
+    const half = ((e.lanesFwd + e.lanesBwd) * w) / 2;
+    return [half, half];
+  };
+  /** A road that changes width at a node gets a circle long enough for its kerbs and lanes to taper. */
+  const taperRadius = (node: CityNode, segs: number[]) => {
+    const legs = [...new Set(segs.map((s) => info[s]!.edge))];
+    if (legs.length !== 2 || legs.some((e) => e.src.cls === 'tram' || e.a === e.b)) return 0;
+    const [l1, r1] = widthsOut(node, legs[0]!);
+    const [l2, r2] = widthsOut(node, legs[1]!);
+    // Looking out along one road the right kerb carries on as the left kerb of the other.
+    const shift = Math.max(Math.abs(r1 - l2), Math.abs(l1 - r2));
+    if (shift < 0.25) return 0;
+    // Take at most 40% of what the junction at the road's other end leaves of it.
+    const room = Math.min(
+      ...legs.map((e) => {
+        const s = (segOfEdge.get(e.id)!.fwd ?? segOfEdge.get(e.id)!.bwd)!;
+        const other = city.nodes[s.from === node.id ? s.to : s.from]!;
+        return 0.4 * (polyline(e.pts).length - other.radius);
+      }),
+    );
+    return Math.min(TAPER * shift, TAPER_MAX, room);
+  };
+
   // ── junction sizes: room for the widest crossing road ──
   const degreeOf = new Map<number, number>();
   /** Streets meeting at a node, tracks left out: only road junctions take traffic lights. */
@@ -280,6 +320,11 @@ export function buildCityFromDistrict(district: District): City {
     node.radius = Math.min(r, CLUSTER_RADIUS);
     const names = [...new Set(segs.map((s) => city.streets[city.segments[s]!.street]!.name).filter(Boolean))];
     node.name = names.slice(0, 3).join(' × ') || 'Raskrsnica';
+  }
+
+  // Tapers, once the junctions around them have their size.
+  for (const node of city.nodes) {
+    if (!node.boundary && degreeOf.get(node.id) === 2) node.radius = Math.max(node.radius, taperRadius(node, [...node.in, ...node.out]));
   }
 
   // ── traffic signals: an OSM signal node belongs to the nearest junction within reach ──
@@ -555,6 +600,32 @@ function foldPassThrough(edges: Map<number, WorkEdge>, boundary: Set<number>, si
 
 // ───────────────────────────── geometry ─────────────────────────────
 
+/** Rounds every bend sharper than ROUND_BEND into a curve of BEND_RADIUS, within half of each piece around it. */
+function roundCorners(raw: Vec2[]): Vec2[] {
+  // OSM may repeat a point: a zero-length piece has no direction.
+  const pts = raw.filter((p, i) => i === 0 || i === raw.length - 1 || dist(p, raw[i - 1]!) > 0.05);
+  if (pts.length < 3) return pts;
+  const out: Vec2[] = [pts[0]!];
+  for (let i = 1; i < pts.length - 1; i++) {
+    const [a, p, b] = [pts[i - 1]!, pts[i]!, pts[i + 1]!];
+    const uIn = norm(sub(p, a));
+    const uOut = norm(sub(b, p));
+    const bend = Math.acos(Math.max(-1, Math.min(1, dot(uIn, uOut))));
+    if (bend < ROUND_BEND) {
+      out.push(p);
+      continue;
+    }
+    const t = Math.min(BEND_RADIUS * Math.tan(Math.min(bend, 2.6) / 2), dist(a, p) / 2, dist(p, b) / 2);
+    if (t < 0.3) {
+      out.push(p);
+      continue;
+    }
+    out.push(...quadBezier(sub(p, scale(uIn, t)), p, add(p, scale(uOut, t)), 6));
+  }
+  out.push(pts[pts.length - 1]!);
+  return out;
+}
+
 function centroid(ps: Vec2[]): Vec2 {
   const s = ps.reduce((a, p) => add(a, p), { x: 0, z: 0 });
   return scale(s, 1 / ps.length);
@@ -626,16 +697,26 @@ function connect(city: City, node: CityNode, inLane: Lane, outLane: Lane, turn: 
   const chord = dist(p0, p1);
   let points: Vec2[];
   let vmax = Math.min(sIn.speed, sOut.speed);
+  const lateral = Math.abs(cross(d0, sub(p1, p0)));
+  const k = chord / 3;
   if (Math.abs(cross(d0, d1)) < 0.17 && dot(d0, d1) > 0) {
-    points = [p0, p1];
-  } else {
-    let c = lineIntersection(p0, d0, p1, d1);
-    if (!c || dot(sub(c, p0), d0) <= 0 || dot(sub(p1, c), d1) <= 0 || dist(c, p0) > 3 * chord) {
-      c = scale(add(add(p0, scale(d0, chord / 2)), sub(p1, scale(d1, chord / 2))), 0.5);
+    // Straight on, or an S-bend across to an offset lane (a taper, a lane that starts aside).
+    if (lateral < 0.2 || chord < 0.5) points = [p0, p1];
+    else {
+      points = cubicBezier(p0, add(p0, scale(d0, k)), sub(p1, scale(d1, k)), p1, 10);
+      vmax = Math.max(3.5, Math.min(vmax, Math.sqrt((2.4 * chord * chord) / (4 * lateral))));
     }
-    points = quadBezier(p0, c, p1, 10);
-    const r = Math.max(1, Math.min(dist(c, p0), dist(c, p1)));
-    vmax = Math.max(3.5, Math.min(vmax, Math.sqrt(2.4 * r)));
+  } else {
+    const c = lineIntersection(p0, d0, p1, d1);
+    if (c && dot(sub(c, p0), d0) > 0 && dot(sub(p1, c), d1) > 0 && dist(c, p0) <= 3 * chord) {
+      points = quadBezier(p0, c, p1, 10);
+      const r = Math.max(1, Math.min(dist(c, p0), dist(c, p1)));
+      vmax = Math.max(3.5, Math.min(vmax, Math.sqrt(2.4 * r)));
+    } else {
+      // The lanes' lines do not meet ahead of both ends: leave and join each lane along it.
+      points = cubicBezier(p0, add(p0, scale(d0, k)), sub(p1, scale(d1, k)), p1, 10);
+      vmax = Math.max(3.5, Math.min(vmax, Math.sqrt(2.4 * Math.max(1, chord / 2))));
+    }
   }
   const conn: Connector = {
     id: city.connectors.length,

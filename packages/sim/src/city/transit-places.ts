@@ -27,20 +27,33 @@ export const BAY_BACK = 22;
 export const BAY_FWD = 7;
 export const BAY_WIDTH = 3;
 export const BAY_TAPER_IN = 8;
+/** Room a bus standing at the stop needs past it on the lane. */
+const BAY_NOSE = 2;
 /** Sidewalk kept clear behind a bay: the shelter stands there. */
 const BAY_WALK = 1.6;
+
+/** A node joining just two streets (a change of width), not a junction. */
+function isTaper(city: City, node: number): boolean {
+  const n = city.nodes[node]!;
+  const roads = new Set([...n.in, ...n.out].filter((s) => !city.segments[s]!.rail).map((s) => Math.min(s, city.segments[s]!.reverse < 0 ? s : city.segments[s]!.reverse)));
+  return !n.boundary && roads.size === 2;
+}
 
 /**
  * Whether a bay fits at a curb stop: inside its lane, with no building on the bay or the sidewalk behind it
  * and no other road on the bay.
  */
 function bayFits(city: City, lane: Lane, s: number, inBuilding: (p: Vec2) => string | undefined, onRoad: RoadSurface): boolean {
-  if (s - BAY_BACK < 0 || s + BAY_FWD > lane.length) return false;
   const seg = city.segments[lane.seg]!;
+  // At a node where the street only changes width, the bay's tapers may run off the lane into it;
+  // the full-width part and the bus's nose stay on the lane.
+  const back = isTaper(city, seg.from) ? BAY_BACK - BAY_TAPER_IN : BAY_BACK;
+  const fwd = isTaper(city, seg.to) ? BAY_NOSE : BAY_FWD;
+  if (s - back < 0 || s + fwd > lane.length) return false;
   const kerb = city.streets[seg.street]!.laneWidth / 2;
   // The kerb returns of the street's own junctions may meet a bay at its ends.
   const own = (node: number) => node === seg.from || node === seg.to;
-  for (let at = s - BAY_BACK; at <= s + BAY_FWD; at += 2) {
+  for (let at = Math.max(0, s - BAY_BACK); at <= Math.min(lane.length, s + BAY_FWD); at += 2) {
     for (const off of [0.5, BAY_WIDTH / 2, BAY_WIDTH, BAY_WIDTH + BAY_WALK]) {
       const p = lanePoint(city, lane.id, at, kerb + off);
       if (inBuilding(p) || (off <= BAY_WIDTH && onRoad(p, 0, own))) return false;
