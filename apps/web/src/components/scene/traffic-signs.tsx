@@ -1,6 +1,6 @@
 'use client';
 
-import { endTangent, headingOf, poseAlong, type City, type TrafficSign } from '@kolo/sim';
+import { endTangent, headingOf, laneY, poseAlong, type City, type TrafficSign } from '@kolo/sim';
 import { useLayoutEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { palette } from '@/lib/palette';
@@ -13,10 +13,13 @@ interface Placed {
   z: number;
   /** Facing the traffic it is for. */
   heading: number;
+  /** Height of the kerb it stands on (a bridge deck). */
+  y: number;
 }
 
 interface Bar {
   x: number;
+  y: number;
   z: number;
   w: number;
   heading: number;
@@ -57,12 +60,13 @@ function placeSigns(city: City): { signs: Placed[]; bars: Bar[] } {
     const d = endTangent(curb.line);
     // On the kerb just before the stop line.
     const p = poseAlong(curb.line, Math.max(0, curb.length - 2.5), w / 2 + 1.4);
-    signs.push({ kind: sign.kind, x: p.x, z: p.z, heading: headingOf({ x: -d.x, z: -d.z }) });
+    const y = laneY(city, curb.id, curb.length);
+    signs.push({ kind: sign.kind, x: p.x, z: p.z, heading: headingOf({ x: -d.x, z: -d.z }), y });
     if (sign.kind === 'stop') {
       const inner = lanes[0]!;
       const a = poseAlong(inner.line, inner.length - 0.3, -w / 2);
       const b = poseAlong(curb.line, curb.length - 0.3, w / 2);
-      bars.push({ x: (a.x + b.x) / 2, z: (a.z + b.z) / 2, w: Math.hypot(b.x - a.x, b.z - a.z), heading: headingOf(d) });
+      bars.push({ x: (a.x + b.x) / 2, y, z: (a.z + b.z) / 2, w: Math.hypot(b.x - a.x, b.z - a.z), heading: headingOf(d) });
     }
   }
   return { signs, bars };
@@ -79,14 +83,14 @@ export function TrafficSigns({ city }: { city: City }) {
     tmp.rotation.set(0, 0, 0);
     tmp.scale.set(1, 1, 1);
     signs.forEach((s, i) => {
-      tmp.position.set(s.x, POLE_H / 2, s.z);
+      tmp.position.set(s.x, s.y + POLE_H / 2, s.z);
       tmp.updateMatrix();
       poles.current?.setMatrixAt(i, tmp.matrix);
     });
     bars.forEach((b, i) => {
       tmp.rotation.set(0, b.heading, 0);
       tmp.scale.set(b.w, 1, 0.45);
-      tmp.position.set(b.x, 0.045, b.z);
+      tmp.position.set(b.x, b.y + 0.045, b.z);
       tmp.updateMatrix();
       stopBars.current?.setMatrixAt(i, tmp.matrix);
     });
@@ -132,7 +136,7 @@ function SignPlates({ kind, signs }: { kind: TrafficSign['kind']; signs: Placed[
         [border, BORDER],
         [face, FACE],
       ] as const) {
-        tmp.position.set(s.x + Math.sin(s.heading) * layer.ahead, PLATE_Y, s.z + Math.cos(s.heading) * layer.ahead);
+        tmp.position.set(s.x + Math.sin(s.heading) * layer.ahead, s.y + PLATE_Y, s.z + Math.cos(s.heading) * layer.ahead);
         tmp.updateMatrix();
         ref.current?.setMatrixAt(i, tmp.matrix);
       }

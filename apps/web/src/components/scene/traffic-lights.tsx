@@ -2,7 +2,7 @@
 
 import { useFrame, type ThreeEvent } from '@react-three/fiber';
 import { LIGHT_ASPECTS } from '@kolo/contracts';
-import { endTangent, headingOf, poseAlong, type City } from '@kolo/sim';
+import { endTangent, headingOf, nodeY, poseAlong, type City } from '@kolo/sim';
 import { useLayoutEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { frameBuffer } from '@/lib/live';
@@ -12,8 +12,9 @@ import { useUi } from '@/lib/ui-store';
 interface Approach {
   node: number;
   phase: number;
-  /** Pole foot. */
+  /** Pole foot; y: the junction's height (on a bridge deck). */
   x: number;
+  y: number;
   z: number;
   heading: number;
   /** Stop bar centre, width across the approach and its heading. */
@@ -53,6 +54,7 @@ function approachesOf(city: City): Approach[] {
         node: node.id,
         phase: seg.phase,
         x: pole.x,
+        y: nodeY(city, node.id),
         z: pole.z,
         heading: headingOf({ x: -d.x, z: -d.z }),
         barX: (a.x + b.x) / 2,
@@ -97,21 +99,21 @@ export function TrafficLights({ city }: { city: City }) {
     approaches.forEach((a, i) => {
       tmp.rotation.set(0, a.heading, 0);
       tmp.scale.set(1, 1, 1);
-      tmp.position.set(a.x, 2.4, a.z);
+      tmp.position.set(a.x, a.y + 2.4, a.z);
       tmp.updateMatrix();
       poles.current?.setMatrixAt(i, tmp.matrix);
-      tmp.position.set(a.x, 4.4, a.z);
+      tmp.position.set(a.x, a.y + 4.4, a.z);
       tmp.updateMatrix();
       heads.current?.setMatrixAt(i, tmp.matrix);
       const fwd = { x: Math.sin(a.heading) * 0.32, z: Math.cos(a.heading) * 0.32 };
       [red, amber, green].forEach((ref, k) => {
-        tmp.position.set(a.x + fwd.x, 5.05 - k * 0.62, a.z + fwd.z);
+        tmp.position.set(a.x + fwd.x, a.y + 5.05 - k * 0.62, a.z + fwd.z);
         tmp.updateMatrix();
         ref.current?.setMatrixAt(i, tmp.matrix);
         ref.current?.setColorAt(i, OFF);
       });
       tmp.rotation.set(0, a.barHeading, 0);
-      tmp.position.set(a.barX, 0.045, a.barZ);
+      tmp.position.set(a.barX, a.y + 0.045, a.barZ);
       tmp.scale.set(a.barW, 1, 0.5);
       tmp.updateMatrix();
       bars.current?.setMatrixAt(i, tmp.matrix);

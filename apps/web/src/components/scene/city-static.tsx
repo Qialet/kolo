@@ -10,11 +10,13 @@ import { useUi } from '@/lib/ui-store';
 import { ChunkedInstances, type InstancePart } from './chunked';
 import {
   buildBuildingChunks,
+  buildDeckGeometry,
   buildDepotGeometry,
   buildGroundGeometry,
   buildingOfTriangle,
   buildMarkingsGeometry,
   buildPlaygroundGeometry,
+  buildPortalGeometry,
   buildRoadGeometry,
   buildTrackGeometry,
   buildWireGeometry,
@@ -22,6 +24,7 @@ import {
   flatPolygon,
   LEVEL,
   platformOf,
+  stopHeight,
   withWindows,
 } from './city-geometry';
 
@@ -47,6 +50,8 @@ function Ground({ city }: { city: City }) {
   const roads = useMemo(() => buildRoadGeometry(city), [city]);
   const markings = useMemo(() => buildMarkingsGeometry(city), [city]);
   const depots = useMemo(() => buildDepotGeometry(city), [city]);
+  const decks = useMemo(() => buildDeckGeometry(city), [city]);
+  const portals = useMemo(() => buildPortalGeometry(city), [city]);
   const b = city.bounds;
   return (
     <group>
@@ -60,6 +65,13 @@ function Ground({ city }: { city: City }) {
       </mesh>
       <mesh geometry={roads} receiveShadow>
         <meshStandardMaterial vertexColors roughness={1} />
+      </mesh>
+      {/* Bridge decks and tunnel portals stand up from the street: they cast shadows on it. */}
+      <mesh geometry={decks} castShadow receiveShadow>
+        <meshStandardMaterial vertexColors roughness={0.95} />
+      </mesh>
+      <mesh geometry={portals} castShadow receiveShadow>
+        <meshStandardMaterial vertexColors roughness={0.95} />
       </mesh>
       <mesh geometry={depots.lots} receiveShadow>
         <meshStandardMaterial vertexColors roughness={0.95} />
@@ -262,7 +274,7 @@ function BusStops({ city }: { city: City }) {
   useLayoutEffect(() => {
     city.busStops.forEach((stop, i) => {
       // Tram-only stops: the shelter stands on the platform; left of the track it turns round to face it.
-      tmp.position.set(stop.x, platformOf(city, stop) ? LEVEL.platform : LEVEL.ground, stop.z);
+      tmp.position.set(stop.x, (platformOf(city, stop) ? LEVEL.platform : LEVEL.ground) + stopHeight(city, stop), stop.z);
       tmp.rotation.set(0, stop.heading + ((stop.platform ?? 0) < 0 ? Math.PI : 0), 0);
       tmp.updateMatrix();
       for (const m of refs.current) m?.setMatrixAt(i, tmp.matrix);

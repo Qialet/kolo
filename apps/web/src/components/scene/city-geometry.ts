@@ -3,6 +3,8 @@ import {
   BAY_FWD,
   BAY_TAPER_IN,
   BAY_WIDTH,
+  connectorY,
+  laneY,
   polyline,
   poseAlong,
   roadSurface,
@@ -126,9 +128,8 @@ export function flatPolygon(outer: Vec2[], holes: Vec2[][], y: number, color: st
   return paint(upward(pos), color);
 }
 
-/** Ribbon along a polyline, `left` / `right` metres to either side (mitred joins). */
-function ribbon(points: Vec2[], left: number, right: number, y: number, color: string): THREE.BufferGeometry | null {
-  if (points.length < 2) return null;
+/** Mitred side vectors of a polyline: the right-hand offset direction at each point, scaled for the mitre. */
+function mitres(points: Vec2[]): Vec2[] {
   const normals: Vec2[] = [];
   for (let i = 1; i < points.length; i++) {
     const a = points[i - 1]!;
@@ -136,27 +137,41 @@ function ribbon(points: Vec2[], left: number, right: number, y: number, color: s
     const l = Math.hypot(b.x - a.x, b.z - a.z) || 1;
     normals.push({ x: -(b.z - a.z) / l, z: (b.x - a.x) / l });
   }
-  const side = (i: number): Vec2 => {
+  return points.map((_, i) => {
     const n1 = normals[Math.max(0, i - 1)]!;
     const n2 = normals[Math.min(normals.length - 1, i)]!;
     const m = { x: n1.x + n2.x, z: n1.z + n2.z };
     const l = Math.hypot(m.x, m.z) || 1;
     const k = Math.max(0.5, (m.x * n1.x + m.z * n1.z) / l);
     return { x: m.x / l / k, z: m.z / l / k };
-  };
+  });
+}
+
+/** Ribbon along a polyline, `left` / `right` metres to either side (mitred joins), raised by `lift` at each point. */
+function ribbon(points: Vec2[], left: number, right: number, y: number, color: string, lift?: number[]): THREE.BufferGeometry | null {
+  if (points.length < 2) return null;
+  const side = mitres(points);
   const pos: number[] = [];
   for (let i = 1; i < points.length; i++) {
     const a = points[i - 1]!;
     const b = points[i]!;
-    const na = side(i - 1);
-    const nb = side(i);
-    const al = [a.x - na.x * left, y, a.z - na.z * left];
-    const ar = [a.x + na.x * right, y, a.z + na.z * right];
-    const bl = [b.x - nb.x * left, y, b.z - nb.z * left];
-    const br = [b.x + nb.x * right, y, b.z + nb.z * right];
+    const na = side[i - 1]!;
+    const nb = side[i]!;
+    const ya = y + (lift?.[i - 1] ?? 0);
+    const yb = y + (lift?.[i] ?? 0);
+    const al = [a.x - na.x * left, ya, a.z - na.z * left];
+    const ar = [a.x + na.x * right, ya, a.z + na.z * right];
+    const bl = [b.x - nb.x * left, yb, b.z - nb.z * left];
+    const br = [b.x + nb.x * right, yb, b.z + nb.z * right];
     pos.push(...al, ...ar, ...br, ...al, ...br, ...bl);
   }
   return paint(upward(pos), color);
+}
+
+/** Heights at the points of a line from a height along its arc; none when it lies on the street. */
+function liftAlong(line: Polyline, at: (s: number) => number): number[] | undefined {
+  const lift = line.cum.map(at);
+  return lift.some((y) => y > 0.01) ? lift : undefined;
 }
 
 /** Turns sharper than this get a round join (the mitre of a ribbon is clamped). */
@@ -265,16 +280,16 @@ function bayOutline(stop: BusStop, lane: Lane, kerb: number): Vec2[] {
   return [...inner, ...outer.reverse()];
 }
 
-/** Asphalt: a strip per road, a pad per junction and the bus bays. */
+/** Asphalt at street level: a strip per road, a pad per junction and the bus bays (bridge decks: buildDeckGeometry). */
 export function buildRoadGeometry(city: City) {
   const parts: THREE.BufferGeometry[] = [];
   for (const r of city.roads) {
     // Tunnels run under the blocks: drawing them on the ground would cut through courtyards.
-    if (r.layer < 0) continue;
+    if (r.layer < 0 || r.y) continue;
     const g = ribbon(r.points, r.left, r.right, LEVEL.road, palette.asphalt);
     if (g) parts.push(g);
   }
-  for (const pad of city.pads) if (pad.layer >= 0) parts.push(padGeometry(pad.outline, pad.island, city.nodes[pad.node]!, LEVEL.road + 0.001, palette.asphalt));
+  for (const pad of city.pads) if (pad.layer >= 0 && !pad.y) parts.push(padGeometry(pad.outline, pad.island, city.nodes[pad.node]!, LEVEL.road + 0.001, palette.asphalt));
   // Bus bays cut into the sidewalk, just under the street's own asphalt where they meet.
   for (const { stop, lane, kerb } of curbStops(city)) if (stop.bay) parts.push(flatPolygon(bayOutline(stop, lane, kerb), [], LEVEL.road - 0.002, palette.asphalt));
   // Service roads and streets no car takes, under the streets' asphalt where they join.
@@ -282,9 +297,147 @@ export function buildRoadGeometry(city: City) {
   return merge(parts);
 }
 
-/** Dashes along a lane line `lateral` metres to its right. */
-function dashes(parts: THREE.BufferGeometry[], lane: Lane, lateral: number, dash: number, gap: number) {
+/** Bridge decks: a slab under the asphalt with sides, parapets once off the ground, piers under the high stretches. */
+const DECK = { slab: 1, parapet: 0.8, parapetWidth: 0.3, parapetFrom: 1.5, pier: 1.2, pierFrom: 2.5, pierStep: 25, twinPiers: 12, railHalf: 1.7 } as const;
+
+/**
+ * A band along a polyline between the offset lines `at` and `at + width` (to the right, negative to
+ * the left), from `bottom` up to `top` at each point: a vertical face on each line (both ways round)
+ * and, when it has a width, its top. A zero width gives a single wall.
+ */
+function band(points: Vec2[], side: Vec2[], at: number, width: number, bottom: number[], top: number[], color: string): THREE.BufferGeometry {
+  const pos: number[] = [];
+  const off = (i: number, o: number) => ({ x: points[i]!.x + side[i]!.x * o, z: points[i]!.z + side[i]!.z * o });
+  const face = (o: number) => {
+    for (let i = 1; i < points.length; i++) {
+      const a = off(i - 1, o);
+      const b = off(i, o);
+      const quadPos = [a.x, top[i - 1]!, a.z, a.x, bottom[i - 1]!, a.z, b.x, bottom[i]!, b.z, a.x, top[i - 1]!, a.z, b.x, bottom[i]!, b.z, b.x, top[i]!, b.z];
+      pos.push(...quadPos);
+      // The other way round, so the face shows from both sides.
+      for (let k = quadPos.length - 3; k >= 0; k -= 3) pos.push(quadPos[k]!, quadPos[k + 1]!, quadPos[k + 2]!);
+    }
+  };
+  face(at);
+  if (width) {
+    face(at + width);
+    for (let i = 1; i < points.length; i++) {
+      const [a0, a1, b0, b1] = [off(i - 1, at), off(i - 1, at + width), off(i, at), off(i, at + width)];
+      pos.push(a0.x, top[i - 1]!, a0.z, a1.x, top[i - 1]!, a1.z, b1.x, top[i]!, b1.z, a0.x, top[i - 1]!, a0.z, b1.x, top[i]!, b1.z, b0.x, top[i]!, b0.z);
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.computeVertexNormals();
+  return paint(g, color);
+}
+
+/** Slab sides, parapets and piers of a deck strip `left` / `right` of its line, its surface at `lift` above the street. */
+function deckSides(parts: THREE.BufferGeometry[], points: Vec2[], left: number, right: number, lift: number[]) {
+  const side = mitres(points);
+  const under = lift.map((y) => Math.max(LEVEL.ground, y - DECK.slab));
+  const top = lift.map((y) => y + LEVEL.road);
+  parts.push(band(points, side, -left, 0, under, top, palette.deckSide), band(points, side, right, 0, under, top, palette.deckSide));
+  // Parapets in runs of points high enough for one.
+  for (let i = 0; i < points.length; ) {
+    if (lift[i]! < DECK.parapetFrom) {
+      i++;
+      continue;
+    }
+    let j = i;
+    while (j + 1 < points.length && lift[j + 1]! >= DECK.parapetFrom) j++;
+    if (j > i) {
+      const [pts, sd, base] = [points.slice(i, j + 1), side.slice(i, j + 1), top.slice(i, j + 1)];
+      const cap = base.map((y) => y + DECK.parapet);
+      parts.push(band(pts, sd, -left, DECK.parapetWidth, base, cap, palette.deck), band(pts, sd, right - DECK.parapetWidth, DECK.parapetWidth, base, cap, palette.deck));
+    }
+    i = j + 1;
+  }
+  const line = polyline(points);
+  const width = left + right;
+  const axes = width > DECK.twinPiers ? [(right - left) / 2 - width / 2 + 2, (right - left) / 2 + width / 2 - 2] : [(right - left) / 2];
+  for (let s = DECK.pierStep / 2; s < line.length; s += DECK.pierStep) {
+    const k = line.cum.findIndex((c) => c >= s);
+    const t = k > 0 ? (s - line.cum[k - 1]!) / (line.cum[k]! - line.cum[k - 1]! || 1) : 0;
+    const y = k > 0 ? lift[k - 1]! + (lift[k]! - lift[k - 1]!) * t : lift[0]!;
+    if (y < DECK.pierFrom) continue;
+    for (const lateral of axes) {
+      const p = poseAlong(line, s, lateral);
+      parts.push(part(DECK.pier, y - DECK.slab - LEVEL.ground, DECK.pier, palette.deckSide, p.x, LEVEL.ground, p.z, p.heading));
+    }
+  }
+}
+
+/**
+ * Bridge decks lifted to their heights: the asphalt of raised strips and pads with their slabs,
+ * and a concrete slab under every raised track (the tram viaduct).
+ */
+export function buildDeckGeometry(city: City) {
+  const parts: THREE.BufferGeometry[] = [];
+  for (const r of city.roads) {
+    if (r.layer < 0 || !r.y) continue;
+    const g = ribbon(r.points, r.left, r.right, LEVEL.road, palette.asphalt, r.y);
+    if (g) parts.push(g);
+    deckSides(parts, r.points, r.left, r.right, r.y);
+  }
+  for (const pad of city.pads) {
+    if (!pad.y) continue;
+    parts.push(padGeometry(pad.outline, pad.island, city.nodes[pad.node]!, LEVEL.road + 0.001 + pad.y, palette.asphalt));
+    const ring = [...pad.outline, pad.outline[0]!];
+    parts.push(band(ring, mitres(ring), 0, 0, ring.map(() => pad.y! - DECK.slab), ring.map(() => pad.y! + LEVEL.road), palette.deckSide));
+  }
+  const slab = (line: Polyline, lift: number[] | undefined) => {
+    if (!lift) return;
+    const g = ribbon(line.points, DECK.railHalf, DECK.railHalf, LEVEL.ballast, palette.deck, lift);
+    if (g) parts.push(g);
+    deckSides(parts, line.points, DECK.railHalf, DECK.railHalf, lift);
+  };
+  for (const lane of railLanes(city)) slab(lane.line, liftAlong(lane.line, (s) => laneY(city, lane.id, s)));
+  for (const c of railConnectors(city)) slab(c.line, liftAlong(c.line, (s) => connectorY(city, c.id, s)));
+  return merge(parts);
+}
+
+/** Tunnel mouth: the first metres of the tunnel strip darkening into it, under a concrete portal frame. */
+const PORTAL = { mouth: 8, height: 5.5, lintel: 1.2, post: 1, reveal: 0.5 } as const;
+
+/** Portals at both ends of every tunnel strip: the darkening mouth, two posts and a lintel across the road. */
+export function buildPortalGeometry(city: City) {
+  const parts: THREE.BufferGeometry[] = [];
+  const light = new THREE.Color(palette.asphalt);
+  const dark = new THREE.Color(palette.tunnelMouth);
+  for (const r of city.roads) {
+    if (r.layer >= 0) continue;
+    const line = polyline(r.points);
+    const depth = Math.min(PORTAL.mouth, line.length / 2);
+    for (const atStart of [true, false]) {
+      for (let k = 0; k < depth; k++) {
+        const [a, b] = atStart ? [k, Math.min(depth, k + 1)] : [line.length - Math.min(depth, k + 1), line.length - k];
+        const g = ribbon(slice(line, a, b), r.left, r.right, LEVEL.road + 0.003, `#${tmpColor.copy(light).lerp(dark, (k + 1) / depth).getHexString()}`);
+        if (g) parts.push(g);
+      }
+      const s = atStart ? 0 : line.length;
+      const heading = poseAlong(line, s).heading;
+      for (const lateral of [-r.left - PORTAL.reveal - PORTAL.post / 2, r.right + PORTAL.reveal + PORTAL.post / 2]) {
+        const p = poseAlong(line, s, lateral);
+        parts.push(part(PORTAL.post, PORTAL.height - LEVEL.ground, PORTAL.post, palette.deckSide, p.x, LEVEL.ground, p.z, heading));
+      }
+      const mid = poseAlong(line, s, (r.right - r.left) / 2);
+      const span = r.left + r.right + 2 * (PORTAL.reveal + PORTAL.post);
+      parts.push(part(span, PORTAL.lintel, PORTAL.post, palette.deck, mid.x, PORTAL.height - PORTAL.lintel, mid.z, heading));
+    }
+  }
+  return merge(parts);
+}
+
+/** Dashes along a lane line `lateral` metres to its right, lifted with a raised lane. */
+function dashes(city: City, parts: THREE.BufferGeometry[], lane: Lane, lateral: number, dash: number, gap: number) {
   for (let s = 1.5; s + dash < lane.length - 1; s += dash + gap) {
+    if (lane.y) {
+      // On a ramp the dash follows the slope.
+      const g = ribbon([poseAlong(lane.line, s, lateral), poseAlong(lane.line, s + dash, lateral)], 0.07, 0.07, LEVEL.marking, palette.marking, [laneY(city, lane.id, s), laneY(city, lane.id, s + dash)]);
+      if (g) parts.push(g);
+      continue;
+    }
     const p = poseAlong(lane.line, s + dash / 2, lateral);
     parts.push(quad(0.14, dash, p.x, LEVEL.marking, p.z, palette.marking, p.heading));
   }
@@ -327,13 +480,13 @@ export function buildMarkingsGeometry(city: City) {
     const lanes = seg.lanes.map((l) => city.lanes[l]!);
     const w = laneWidth(city, lanes[0]!);
     // Centre line once per two-way pair, on the left edge of the inner lane.
-    if (seg.reverse > seg.id) dashes(parts, lanes[0]!, -w / 2, 3, 4);
-    for (let i = 0; i + 1 < lanes.length; i++) dashes(parts, lanes[i]!, w / 2, 3, 6);
+    if (seg.reverse > seg.id) dashes(city, parts, lanes[0]!, -w / 2, 3, 4);
+    for (let i = 0; i + 1 < lanes.length; i++) dashes(city, parts, lanes[i]!, w / 2, 3, 6);
     const to = city.nodes[seg.to]!;
     if (!to.signal && !to.boundary && roadLegs(city, to.in).length + roadLegs(city, to.out).length > 2) {
       for (const lane of lanes) {
         const p = poseAlong(lane.line, lane.length - 0.25);
-        parts.push(quad(w, 0.45, p.x, LEVEL.marking + 0.001, p.z, palette.marking, p.heading));
+        parts.push(quad(w, 0.45, p.x, LEVEL.marking + 0.001 + laneY(city, lane.id, lane.length - 0.25), p.z, palette.marking, p.heading));
       }
     }
   }
@@ -554,20 +707,24 @@ export function buildWireGeometry(city: City): THREE.BufferGeometry {
     return s.lanes[s.lanes.length - 1]!;
   };
   const wired = new Set(city.segments.filter((s) => s.trolley).map((s) => curbOf(s.id)));
-  const string = (line: Lane['line'], sides: readonly number[], height: number) => {
+  /** Wires along a line `height` above it, `lift` giving the line's own height (a deck) at each arc length. */
+  const string = (line: Lane['line'], sides: readonly number[], height: number, lift: (s: number) => number) => {
     for (const side of sides) {
-      let prev = poseAlong(line, 0, side);
+      let prev = { ...poseAlong(line, 0, side), y: height + lift(0) };
       for (let s = WIRE_STEP; s < line.length + WIRE_STEP; s += WIRE_STEP) {
-        const p = poseAlong(line, Math.min(s, line.length), side);
-        pos.push(prev.x, height, prev.z, p.x, height, p.z);
+        const at = Math.min(s, line.length);
+        const p = { ...poseAlong(line, at, side), y: height + lift(at) };
+        pos.push(prev.x, prev.y, prev.z, p.x, p.y, p.z);
         prev = p;
       }
     }
   };
-  for (const id of wired) string(city.lanes[id]!.line, TROLLEY_SIDES, WIRE_HEIGHT);
-  for (const c of city.connectors) if (wired.has(c.from) && wired.has(c.to)) string(c.line, TROLLEY_SIDES, WIRE_HEIGHT);
-  for (const lane of railLanes(city)) string(lane.line, [0], TRAM_WIRE_HEIGHT);
-  for (const c of railConnectors(city)) string(c.line, [0], TRAM_WIRE_HEIGHT);
+  const ofLane = (id: number) => (s: number) => laneY(city, id, s);
+  const ofConnector = (id: number) => (s: number) => connectorY(city, id, s);
+  for (const id of wired) string(city.lanes[id]!.line, TROLLEY_SIDES, WIRE_HEIGHT, ofLane(id));
+  for (const c of city.connectors) if (wired.has(c.from) && wired.has(c.to)) string(c.line, TROLLEY_SIDES, WIRE_HEIGHT, ofConnector(c.id));
+  for (const lane of railLanes(city)) string(lane.line, [0], TRAM_WIRE_HEIGHT, ofLane(lane.id));
+  for (const c of railConnectors(city)) string(c.line, [0], TRAM_WIRE_HEIGHT, ofConnector(c.id));
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   return g;
@@ -607,6 +764,9 @@ export const platformOf = (city: City, stop: City['busStops'][number]) => {
   return poseAlong(lane.line, Math.max(PLATFORM.length / 2, stop.rail.s - PLATFORM.length / 2), stop.platform);
 };
 
+/** Height of a stop above the street: a tram stop on the viaduct stands on its deck. */
+export const stopHeight = (city: City, stop: City['busStops'][number]) => (stop.rail ? laneY(city, stop.rail.lane, stop.rail.s) : 0);
+
 /**
  * Tram tracks: two rails along every track lane, junction curve and scenery track (yards, the
  * railway), a ballast bed wherever the track runs clear of the asphalt, and a platform at stops
@@ -616,10 +776,10 @@ export function buildTrackGeometry(city: City) {
   const rails: THREE.BufferGeometry[] = [];
   const ballast: THREE.BufferGeometry[] = [];
   const platforms: THREE.BufferGeometry[] = [];
-  const lay = (points: Vec2[]) => {
+  const lay = (points: Vec2[], lift?: number[]) => {
     for (const g of [
-      ribbon(points, -GAUGE_HALF, GAUGE_HALF + RAIL_WIDTH, LEVEL.rail, palette.rail),
-      ribbon(points, GAUGE_HALF + RAIL_WIDTH, -GAUGE_HALF, LEVEL.rail, palette.rail),
+      ribbon(points, -GAUGE_HALF, GAUGE_HALF + RAIL_WIDTH, LEVEL.rail, palette.rail, lift),
+      ribbon(points, GAUGE_HALF + RAIL_WIDTH, -GAUGE_HALF, LEVEL.rail, palette.rail, lift),
     ])
       if (g) rails.push(g);
   };
@@ -628,11 +788,11 @@ export function buildTrackGeometry(city: City) {
     if (g) ballast.push(g);
   };
   const onRoad = roadSurface(city);
-  /** The bed along a line, metre by metre, where its axis leaves the asphalt. */
-  const bedAlong = (line: Polyline) => {
+  /** The bed along a line, metre by metre, where its axis leaves the asphalt (on the street: a deck carries its own slab). */
+  const bedAlong = (line: Polyline, lift: (s: number) => number = () => 0) => {
     let start = -1;
     for (let s = 0; ; s = Math.min(line.length, s + 1)) {
-      const clear = !onRoad(poseAlong(line, s));
+      const clear = lift(s) < 0.3 && !onRoad(poseAlong(line, s));
       if (clear && start < 0) start = s;
       if (start >= 0 && (!clear || s >= line.length)) {
         if (s - start > 1) bed(slice(line, start, s));
@@ -642,12 +802,14 @@ export function buildTrackGeometry(city: City) {
     }
   };
   for (const lane of railLanes(city)) {
-    lay(lane.line.points);
-    bedAlong(lane.line);
+    const at = (s: number) => laneY(city, lane.id, s);
+    lay(lane.line.points, liftAlong(lane.line, at));
+    bedAlong(lane.line, at);
   }
   for (const c of railConnectors(city)) {
-    lay(c.line.points);
-    bedAlong(c.line);
+    const at = (s: number) => connectorY(city, c.id, s);
+    lay(c.line.points, liftAlong(c.line, at));
+    bedAlong(c.line, at);
   }
   for (const t of city.tracks) {
     if (!t.scenery) continue;
@@ -656,7 +818,11 @@ export function buildTrackGeometry(city: City) {
   }
   for (const stop of city.busStops) {
     const p = platformOf(city, stop);
-    if (p) platforms.push(part(PLATFORM.width, PLATFORM.height, PLATFORM.length, palette.platform, p.x, LEVEL.ground, p.z, p.heading));
+    if (!p) continue;
+    // On the viaduct the platform is a wing of the deck, as deep as its slab.
+    const y = stopHeight(city, stop);
+    const below = y > 0.05 ? DECK.slab : 0;
+    platforms.push(part(PLATFORM.width, PLATFORM.height + below, PLATFORM.length, palette.platform, p.x, LEVEL.ground + y - below, p.z, p.heading));
   }
   return { rails: merge(rails), ballast: merge(ballast), platforms: merge(platforms) };
 }

@@ -52,6 +52,11 @@ export const palette = {
   ballast: '#CBC6BD',
   /** Tram platforms: raised islands, lighter than the sidewalk. */
   platform: '#F1F3F7',
+  /** Bridge decks and tunnel portals: light concrete parapets and lintels, darker slab sides and piers. */
+  deck: '#DCE1E8',
+  deckSide: '#A9B3C1',
+  /** The dark end of a tunnel mouth. */
+  tunnelMouth: '#363C47',
   depot: '#7C5CFF',
   depotLot: '#D9D8EC',
   service: '#FF6B3D',
