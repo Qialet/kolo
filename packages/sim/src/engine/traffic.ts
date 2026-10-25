@@ -1,5 +1,6 @@
 import { isTransitKind, type LightMode, type VehicleKind } from '@kolo/contracts';
 import { twinPos } from '../city/corridors.js';
+import { connectorY, inTunnel, laneY } from '../city/decks.js';
 import { lanePoint } from '../city/lanes.js';
 import type { City, Connector, CurbRef, Lane, Segment } from '../city/types.js';
 import { dist, dot, polyline, poseAlong, poseAt, projectOnPolyline, type Polyline, type Pose, type Vec2 } from '../geometry.js';
@@ -871,6 +872,35 @@ export class TrafficSystem {
     const dLat = v.lateralTarget - v.lateral;
     if (Math.abs(dLat) > 0.05) p.heading += Math.sign(dLat) * -0.18 * Math.min(1, Math.abs(dLat));
     v.pose = p;
+  }
+
+  /** Where the pose stands along the vehicle's lane or connector: the middle, a tram's front (as updatePose). */
+  private poseSpot(v: Vehicle): { lane: number; s: number } | { conn: number; s: number } | null {
+    if (v.mode === 'parked' || v.mode === 'yard') return null;
+    const half = v.kind === 'TRAM' ? 0 : v.length / 2;
+    if (v.mode === 'conn') {
+      const c = this.city.connectors[v.conn]!;
+      const sc = v.s - half;
+      return sc >= 0 ? { conn: v.conn, s: sc } : { lane: c.from, s: this.city.lanes[c.from]!.length + sc };
+    }
+    return { lane: v.lane, s: v.s - half };
+  }
+
+  /** Height of the vehicle's pose above the street: on a bridge deck or its ramp, else 0. */
+  heightOf(v: Vehicle): number {
+    const at = this.poseSpot(v);
+    if (!at) return 0;
+    return 'conn' in at ? connectorY(this.city, at.conn, at.s) : laneY(this.city, at.lane, at.s);
+  }
+
+  /** The vehicle is inside a tunnel, past its portals: out of sight. */
+  hidden(v: Vehicle): boolean {
+    const at = this.poseSpot(v);
+    if (!at) return false;
+    if ('lane' in at) return inTunnel(this.city, at.lane, at.s);
+    const c = this.city.connectors[at.conn]!;
+    const under = (lane: number) => this.city.segments[this.city.lanes[lane]!.seg]!.layer < 0;
+    return under(c.from) && under(c.to);
   }
 
   // ───────────────────────────── queries ─────────────────────────────

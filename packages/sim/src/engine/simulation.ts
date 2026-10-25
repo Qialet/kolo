@@ -145,6 +145,8 @@ const SUBSTEP = 0.05;
 
 /** Frame flags of a turn signal: bit 4 left, bit 5 right. */
 const TURN_SIGNAL_BITS = { L: 16, R: 32, none: 0 } as const;
+/** Frame flag of a vehicle inside a tunnel: the client does not draw it. */
+const IN_TUNNEL = 64;
 
 export class Simulation {
   readonly traffic: TrafficSystem;
@@ -873,7 +875,7 @@ export class Simulation {
     for (const v of this.traffic.vehicles) {
       const taxi = v.kind === 'TAXI' ? this.taxis.get(v.id) : undefined;
       const flags =
-        (v.acc < -1.2 ? 1 : 0) | (v.mode === 'pulled' ? 2 : 0) | (taxi?.activity === 'ON_TRIP' ? 4 : 0) | (v.kind === 'TRAM' && v.length === fixedLength('TRAM', true) ? 8 : 0) | TURN_SIGNAL_BITS[this.traffic.turnSignal(v) ?? 'none'];
+        (v.acc < -1.2 ? 1 : 0) | (v.mode === 'pulled' ? 2 : 0) | (taxi?.activity === 'ON_TRIP' ? 4 : 0) | (v.kind === 'TRAM' && v.length === fixedLength('TRAM', true) ? 8 : 0) | TURN_SIGNAL_BITS[this.traffic.turnSignal(v) ?? 'none'] | (this.traffic.hidden(v) ? IN_TUNNEL : 0);
       vehicles.push([
         v.id,
         VEHICLE_KINDS.indexOf(v.kind),
@@ -883,6 +885,7 @@ export class Simulation {
         Math.round(v.speed * 10) / 10,
         taxi ? TAXI_ACTIVITIES.indexOf(taxi.activity) : -1,
         flags,
+        Math.round(this.traffic.heightOf(v) * 10) / 10,
       ]);
     }
     const lights = this.traffic.signalStates.map((st) =>

@@ -2,12 +2,14 @@ import type { FleetStatus, LightAspect, LightMode, OrderStatus, TaxiActivity, Ve
 
 /**
  * Compact per-vehicle tuple sent at 10 Hz:
- * [id, kindIndex, x, z, heading, speed m/s, activityIndex (taxi) | -1, flags]
+ * [id, kindIndex, x, z, heading, speed m/s, activityIndex (taxi) | -1, flags, y]
  * x, z: the middle of the vehicle, for a tram its front (its sections follow the track behind it).
  * flags bit 0 = braking, bit 1 = pulled over, bit 2 = has passenger, bit 3 = long tram (CAF Urbos 3, else Tatra KT4).
  * bit 4 = left turn signal, bit 5 = right turn signal (lane change, turn at a junction, to and from the kerb; steady: the client blinks it).
+ * bit 6 = inside a tunnel past its portal (not drawn).
+ * y: height of the pose above the street in metres (on a bridge deck or its ramp), 0 at street level.
  */
-export type VehicleTuple = [string, number, number, number, number, number, number, number];
+export type VehicleTuple = [string, number, number, number, number, number, number, number, number];
 
 /**
  * Per signalised intersection with n phases: n aspect indexes, then n "seconds until change" (-1 = held).

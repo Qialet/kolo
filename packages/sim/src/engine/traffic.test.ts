@@ -255,3 +255,57 @@ describe('waitLimit', () => {
     expect(traffic.waitLimit(queue[1]!)).toBe(Math.max(120, cycleOf(traffic.signals[light.id]!.plan) + 30));
   });
 });
+
+describe('vehicles on bridge decks and in tunnels', () => {
+  /** A street from west to east under a bridge from north to south, and a tunnel further east. */
+  const city = buildCityFromDistrict(
+    district(
+      [
+        [-250, 0, { boundary: true }],
+        [250, 0, { boundary: true }],
+        [0, -250, { boundary: true }],
+        [0, -150],
+        [0, 150],
+        [0, 250, { boundary: true }],
+        [600, -250, { boundary: true }],
+        [600, -100],
+        [600, 100],
+        [600, 250, { boundary: true }],
+      ],
+      [
+        [0, 1],
+        [2, 3],
+        [3, 4, { layer: 1, bridge: true }],
+        [4, 5],
+        [6, 7],
+        [7, 8, { layer: -1, tunnel: true }],
+        [8, 9],
+      ],
+    ),
+  );
+  const traffic = new TrafficSystem(city);
+  const put = (id: string, seg: (s: City['segments'][number]) => boolean, at: (length: number) => number) => {
+    const v = makeVehicle(id, 'CAR', createRng(3));
+    const lane = city.lanes[city.segments.find(seg)!.lanes[0]!]!;
+    traffic.add(v);
+    traffic.placeOnLane(v, lane.id, at(lane.length));
+    traffic.step(0.05);
+    return v;
+  };
+
+  it('lifts a car on the deck and leaves the one under it on the street', () => {
+    const over = put('over', (s) => s.layer === 1 && s.dirIn.z > 0, (l) => l / 2 + 2);
+    const under = put('under', (s) => s.layer === 0 && s.dirIn.x > 0 && Math.abs(city.nodes[s.from]!.z) < 1, (l) => l / 2);
+    expect(traffic.heightOf(over)).toBeCloseTo(6, 0);
+    expect(traffic.heightOf(under)).toBe(0);
+    expect(traffic.hidden(over) || traffic.hidden(under)).toBe(false);
+  });
+
+  it('hides a car inside the tunnel, not at its portal', () => {
+    const inside = put('inside', (s) => s.layer < 0 && s.dirIn.z > 0, (l) => l / 2);
+    const portal = put('portal', (s) => s.layer < 0 && s.dirIn.z < 0, () => 0.5);
+    expect(traffic.hidden(inside)).toBe(true);
+    expect(traffic.hidden(portal)).toBe(false);
+    expect(traffic.heightOf(inside)).toBe(0);
+  });
+});

@@ -61,6 +61,9 @@ describe('Simulation', () => {
     expect(kpi.orders.completed).toBeGreaterThan(5);
     const frame = sim.frame();
     expect(frame.vehicles.length).toBeGreaterThan(200);
+    // [.., flags, height]: street level is 0, and only a vehicle on a deck stands higher.
+    for (const t of frame.vehicles) expect(t).toHaveLength(9);
+    expect(frame.vehicles.every((t) => t[8] >= 0 && t[8] <= 20)).toBe(true);
   });
 
   it('prices orders by road distance and reports trip progress along the driven route', () => {
