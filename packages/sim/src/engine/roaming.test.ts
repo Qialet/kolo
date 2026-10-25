@@ -32,6 +32,14 @@ describe('background traffic on real Belgrade roads', () => {
     roaming.onEnter = () => entered++;
     roaming.onLeave = () => left++;
     roaming.onVanish = () => vanished++;
+    let changes = 0;
+    let broken = 0;
+    const changeLane = traffic.changeLane.bind(traffic);
+    traffic.changeLane = (v, lane) => {
+      const done = changeLane(v, lane);
+      if (done) changes++;
+      return done;
+    };
     for (let i = 0; i < 600 * 20; i++) {
       const t0 = cpuMs();
       traffic.step(0.05);
@@ -42,6 +50,8 @@ describe('background traffic on real Belgrade roads', () => {
       const byLane = new Map<number, { s: number; len: number }[]>();
       for (const v of traffic.vehicles) {
         expect(Number.isFinite(v.pose.x) && Number.isFinite(v.pose.z)).toBe(true);
+        // Lane changes re-plan the path: every connector still leaves the lane of the step before it.
+        for (let k = v.pathIdx + 1; k < v.path.length; k++) if (city.connectors[v.path[k]!.conn]!.from !== v.path[k - 1]!.lane) broken++;
         if (v.mode !== 'lane') continue;
         const list = byLane.get(v.lane) ?? [];
         list.push({ s: v.s, len: v.length });
@@ -61,9 +71,12 @@ describe('background traffic on real Belgrade roads', () => {
     const stuck = moving.filter((v) => v.stoppedFor > traffic.waitLimit(v));
     console.log(
       `roaming: avg ${avgKmh.toFixed(1)} km/h, congestion ${congestion.toFixed(2)}, stuck ${stuck.length}, ` +
-        `step ${(stepMs / 12000).toFixed(2)} ms, entered ${entered}, left ${left}, vanished ${vanished}, overlaps ${overlaps}/${checks}`,
+        `step ${(stepMs / 12000).toFixed(2)} ms, entered ${entered}, left ${left}, vanished ${vanished}, overlaps ${overlaps}/${checks}, lane changes ${changes}`,
     );
     expect(overlaps / Math.max(1, checks)).toBeLessThan(0.002);
+    expect(broken).toBe(0);
+    // 739 at the time of writing (plan 8).
+    expect(changes).toBeGreaterThan(300);
     expect(avgKmh).toBeGreaterThan(10);
     expect(congestion).toBeLessThan(0.5);
     expect(stuck).toHaveLength(0);

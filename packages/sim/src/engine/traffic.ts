@@ -4,6 +4,7 @@ import { lanePoint } from '../city/lanes.js';
 import type { City, Connector, CurbRef, Lane, Segment } from '../city/types.js';
 import { dist, dot, polyline, poseAlong, poseAt, projectOnPolyline, type Polyline, type Pose, type Vec2 } from '../geometry.js';
 import type { Rng } from '../rng.js';
+import { decideLaneChange, LC_COOLDOWN, LC_INTERVAL } from './lane-change.js';
 import { yieldsTo } from './priority.js';
 import { chooseLanes, laneIndexesFor, routeSegments, turnBetween } from './routing.js';
 import { cycleOf, isFlashing, signalState, type SignalRuntime, type SignalState } from './signals.js';
@@ -22,6 +23,8 @@ export interface DriverProfile {
   bComf: number;
   headway: number;
   minGap: number;
+  /** MOBIL: how much the gains and losses of neighbours weigh in a lane change (0 = selfish). */
+  politeness: number;
 }
 
 export interface Vehicle {
@@ -62,11 +65,13 @@ export interface Vehicle {
   changeFrom: number;
   /** Position on changeFrom minus position on the current lane during that change. */
   changeShift: number;
+  /** Seconds until the next lane change may start. */
+  changeCooldown: number;
   /** Long vehicles: junction curves left behind (odometer when the front left them), held while the body still covers them. */
   tail: { conn: number; at: number }[];
 }
 
-interface OccEntry {
+export interface OccEntry {
   v: Vehicle;
   pos: number;
 }
@@ -87,14 +92,17 @@ const QUEUE_BEHIND = 20;
 const CHANGE_STRADDLE = 0.8;
 
 export function makeDriver(rng: Rng, kind: VehicleKind): DriverProfile {
-  if (kind === 'TRAM') return { v0Factor: rng.range(0.9, 0.95), aMax: 1.0, bComf: 1.5, headway: 2.0, minGap: 3 };
-  if (isTransitKind(kind)) return { v0Factor: rng.range(0.82, 0.9), aMax: 1.1, bComf: 2.2, headway: 1.5, minGap: 2.5 };
+  if (kind === 'TRAM') return { v0Factor: rng.range(0.9, 0.95), aMax: 1.0, bComf: 1.5, headway: 2.0, minGap: 3, politeness: 0.5 };
+  if (isTransitKind(kind)) return { v0Factor: rng.range(0.82, 0.9), aMax: 1.1, bComf: 2.2, headway: 1.5, minGap: 2.5, politeness: 0.5 };
+  const minGap = rng.range(1.8, 2.6);
   return {
     v0Factor: rng.range(0.88, 1.08),
     aMax: rng.range(1.6, 2.4),
     bComf: rng.range(2.6, 3.4),
     headway: rng.range(1.0, 1.5),
-    minGap: rng.range(1.8, 2.6),
+    minGap,
+    // From the gap the driver keeps (no extra draw: the random stream of every other choice stays as it was).
+    politeness: 0.1 + (0.4 * (minGap - 1.8)) / 0.8,
   };
 }
 
@@ -145,6 +153,7 @@ export function makeVehicle(id: string, kind: VehicleKind, rng: Rng, long = fals
     lineStop: -1,
     changeFrom: -1,
     changeShift: 0,
+    changeCooldown: 0,
     tail: [],
   };
 }
@@ -162,6 +171,7 @@ export class TrafficSystem {
   /** Per node: a tram track leads into it. */
   private railIn: Uint8Array;
   t = 0;
+  private stepNo = 0;
 
   constructor(readonly city: City) {
     this.signals = city.nodes.map((n) => (n.signal ? { plan: { phases: n.signal.phases.map((p) => ({ ...p })), offset: n.signal.offset }, mode: 'AUTO' as LightMode, holdPhase: 0 } : null));
@@ -415,6 +425,7 @@ export class TrafficSystem {
       if (sig) this.signalStates[i] = signalState(sig, this.t);
     }
     this.rebuildOccupancy();
+    this.considerLaneChanges(dt);
     const accs = new Float64Array(this.vehicles.length);
     for (let i = 0; i < this.vehicles.length; i++) {
       const v = this.vehicles[i]!;
@@ -441,6 +452,39 @@ export class TrafficSystem {
       v.stoppedFor = v.speed < 0.3 && (v.mode === 'lane' || v.mode === 'conn') ? v.stoppedFor + dt : 0;
       this.updatePose(v);
     }
+  }
+
+  /** Each vehicle looks at the neighbouring lanes every LC_INTERVAL (staggered by its index). */
+  private considerLaneChanges(dt: number) {
+    const every = Math.max(1, Math.round(LC_INTERVAL / dt));
+    this.stepNo++;
+    for (let i = 0; i < this.vehicles.length; i++) {
+      const v = this.vehicles[i]!;
+      if (v.changeCooldown > 0) v.changeCooldown -= dt;
+      if ((this.stepNo + i) % every !== 0) continue;
+      const to = decideLaneChange(this, v);
+      if (to >= 0 && this.changeLane(v, to)) v.changeCooldown = LC_COOLDOWN;
+    }
+  }
+
+  /** Nearest vehicles ahead of and behind `pos` on a lane (ghosts from twin lanes included), `self` left out. */
+  neighbours(laneId: number, pos: number, self: Vehicle): { leader: OccEntry | null; follower: OccEntry | null } {
+    let leader: OccEntry | null = null;
+    let follower: OccEntry | null = null;
+    for (const e of this.occ[laneId]!) {
+      if (e.v === self) continue;
+      if (e.pos > pos + 0.01) {
+        leader = e;
+        break;
+      }
+      follower = e;
+    }
+    return { leader, follower };
+  }
+
+  /** IDM acceleration of `v` with desired speed `v0` behind a leader `gap` metres ahead going `leaderSpeed`. */
+  idmAccel(v: Vehicle, v0: number, gap: number, leaderSpeed: number): number {
+    return idm(v, v0, gap, leaderSpeed);
   }
 
   private rebuildOccupancy() {
