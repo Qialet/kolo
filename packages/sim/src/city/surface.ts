@@ -1,11 +1,20 @@
-import { add, cubicBezier, dist, dot, lineIntersection, norm, polyline, quadBezier, rightOf, scale, sub, type Polyline, type Vec2 } from '../geometry.js';
-import type { City, CityNode, JunctionPad, RoadStrip } from './types.js';
+import { add, cubicBezier, dist, dot, lineIntersection, norm, polyline, poseAlong, projectOnPolyline, quadBezier, rightOf, scale, sub, type Polyline, type Vec2 } from '../geometry.js';
+import { segmentDistance } from '../import/polygons.js';
+import { SegmentGrid } from './places.js';
+import type { City, CityNode, Crossing, JunctionPad, RoadStrip } from './types.js';
 
 /** Length over which a mouth's outward direction is measured: robust to tiny kinks at the cut. */
 const MOUTH_SPAN = 5;
 /** A kerb return turns round the kerbs' corner unless the corner lies this many times further off than the two kerbs are apart (nearly parallel kerbs). */
 const FILLET_REACH = 3;
 const FILLET_STEPS = 8;
+/** Length of a zebra's stripes along the road, and its clearance from the junction pad. */
+const ZEBRA_DEPTH = 2.8;
+const ZEBRA_CLEAR = 0.6;
+/** A crossing this far off a road's axis beyond its paved width belongs to no road. */
+const CROSSING_REACH = 2;
+/** Crossings of one road closer than this are one zebra (OSM maps some on both carriageway edges). */
+const CROSSING_MERGE = 4;
 
 /** One road between junctions, as the surface sees it: its centre line and paved width on each side. */
 export interface SurfaceRoad {
@@ -17,6 +26,9 @@ export interface SurfaceRoad {
   left: number;
   right: number;
   layer: number;
+  /** Arc lengths along the base where the lanes meet the `from` / `to` junction: the ends of those running in, else the starts of those leaving. */
+  stopFrom: number;
+  stopTo: number;
 }
 
 /** Where a road meets its junction pad: the cut across the asphalt, looking out of the junction. */
@@ -46,6 +58,8 @@ export function laySurface(city: City, roads: SurfaceRoad[], padded: (node: City
     mouths.set(node.id, list);
   };
   const strips: RoadStrip[] = [];
+  /** Span of every road's base that its strip covers. */
+  const spans: [number, number][] = [];
   for (const r of roads) {
     const r0 = padded(r.from) ? r.from.radius : 0;
     const r1 = padded(r.to) ? r.to.radius : 0;
@@ -53,6 +67,7 @@ export function laySurface(city: City, roads: SurfaceRoad[], padded: (node: City
     const to = { ...r.to, radius: r1 };
     const line = trimToJunctions(r.base, from, to);
     strips.push({ points: line.points, left: r.left, right: r.right, layer: r.layer });
+    spans.push([projectOnPolyline(r.base, line.points[0]!), projectOnPolyline(r.base, line.points[line.points.length - 1]!)]);
     const kerbL = polyline(offsetPoints(r.base.points, -r.left));
     const kerbR = polyline(offsetPoints(r.base.points, r.right));
     const enter = (kerb: Polyline, atStart: boolean) => {
@@ -71,7 +86,46 @@ export function laySurface(city: City, roads: SurfaceRoad[], padded: (node: City
     if (list.length < 2 || list.every((m) => m.layer < 0)) continue;
     pads.push({ node: id, outline: padOutline(city.nodes[id]!, list), layer: Math.max(...list.map((m) => m.layer)) });
   }
-  return { strips, pads };
+  return { strips, pads, spans };
+}
+
+/**
+ * Zebras at the marked crossings (x, z pairs) of streets at ground level, across the nearest road.
+ * A crossing at a junction mouth lies just inside the junction past where the lanes meet it, so
+ * vehicles stop before it; one along the road stays put.
+ */
+export function placeCrossings(points: number[], roads: SurfaceRoad[], spans: [number, number][]): Crossing[] {
+  const grid = new SegmentGrid<number>();
+  roads.forEach((r, i) => {
+    if (r.layer !== 0) return;
+    const p = r.base.points;
+    for (let k = 1; k < p.length; k++) grid.add(p[k - 1]!, p[k]!, i);
+  });
+  const placed: { road: number; s: number }[] = [];
+  const out: Crossing[] = [];
+  for (let k = 0; k < points.length; k += 2) {
+    const p = { x: points[k]!, z: points[k + 1]! };
+    let road = -1;
+    let gap = Infinity;
+    for (const { a, b, item } of grid.near(p, 30)) {
+      const r = roads[item]!;
+      const d = segmentDistance(p, a, b) - Math.max(r.left, r.right);
+      if (d < gap) [gap, road] = [d, item];
+    }
+    if (road < 0 || gap > CROSSING_REACH) continue;
+    const r = roads[road]!;
+    const [s0, s1] = spans[road]!;
+    const edge = ZEBRA_DEPTH / 2 + ZEBRA_CLEAR;
+    if (s1 - s0 < 2 * edge) continue;
+    const at = projectOnPolyline(r.base, p);
+    // Within a zebra's reach of the strip's ends it belongs to the junction.
+    const s = at < s0 + 2 * edge ? r.stopFrom - edge : at > s1 - 2 * edge ? r.stopTo + edge : at;
+    if (placed.some((q) => q.road === road && Math.abs(q.s - s) < CROSSING_MERGE)) continue;
+    placed.push({ road, s });
+    const pose = poseAlong(r.base, s);
+    out.push({ x: pose.x, z: pose.z, heading: pose.heading, left: r.left, right: r.right });
+  }
+  return out;
 }
 
 /** Direction from the junction into the road at the start (or end) of a cut line. */

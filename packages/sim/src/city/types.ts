@@ -163,6 +163,16 @@ export interface JunctionPad {
   layer: number;
 }
 
+/** A zebra across a road: its middle on the road's axis, the axis direction and the paved width to each side. */
+export interface Crossing {
+  x: number;
+  z: number;
+  heading: number;
+  /** Metres to the left / right of the axis looking along `heading`. */
+  left: number;
+  right: number;
+}
+
 export interface Tree {
   x: number;
   z: number;
@@ -294,6 +304,7 @@ export interface City {
   connectors: Connector[];
   roads: RoadStrip[];
   pads: JunctionPad[];
+  crossings: Crossing[];
   tracks: Track[];
   areas: Area[];
   buildings: Building[];

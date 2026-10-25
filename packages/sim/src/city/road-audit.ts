@@ -24,6 +24,7 @@ export type RoadCheck =
   | 'backwardConnectors'
   | 'longConnectors'
   | 'connectorsOffAsphalt'
+  | 'stopsOnZebras'
   | 'railOffTrack'
   | 'railDeadEnds';
 
@@ -37,6 +38,8 @@ const STUB_LANE = 3;
 const KINK = 25;
 const BACKWARD = 150;
 const LONG_CONNECTOR = 45;
+/** Half the depth of a zebra's stripes along the road. */
+const ZEBRA_HALF = 1.4;
 /** Furthest a track curve may stray from the OSM track it stands for. */
 const RAIL_STRAY = 0.6;
 
@@ -60,6 +63,7 @@ export function auditRoads(city: City, district: District): RoadAudit {
     backwardConnectors: [],
     longConnectors: [],
     connectorsOffAsphalt: [],
+    stopsOnZebras: [],
     railOffTrack: [],
     railDeadEnds: [],
   };
@@ -127,6 +131,18 @@ export function auditRoads(city: City, district: District): RoadAudit {
       if (!onRoad(q)) [off, where] = [off + 1, q];
     }
     if (off) audit.connectorsOffAsphalt.push(at(where, off, `${c.turn} ${street(city.lanes[c.from]!.seg)} → ${street(city.lanes[c.to]!.seg)}`));
+  }
+
+  // A lane end (where vehicles wait) on a zebra's stripes.
+  for (const z of city.crossings) {
+    const d = { x: Math.sin(z.heading), z: Math.cos(z.heading) };
+    for (const l of city.lanes) {
+      if (rail(l.id) || !l.out.length || Math.abs(l.end.x - z.x) > 20 || Math.abs(l.end.z - z.z) > 20) continue;
+      const v = { x: l.end.x - z.x, z: l.end.z - z.z };
+      const along = v.x * d.x + v.z * d.z;
+      const lat = v.z * d.x - v.x * d.z;
+      if (Math.abs(along) < ZEBRA_HALF && lat > -z.left && lat < z.right) audit.stopsOnZebras.push(at(l.end, Math.abs(along), street(l.seg)));
+    }
   }
 
   const tracks = district.roads.edges

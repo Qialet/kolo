@@ -48,6 +48,21 @@ describe('toLatin', () => {
 });
 
 describe('importRoads', () => {
+  it('keeps the marked pedestrian crossings of the streets', () => {
+    const o = osm();
+    const marked = o.node(-20, 0, { highway: 'crossing', crossing: 'uncontrolled' });
+    const lights = o.node(0, 0, { highway: 'traffic_signals', crossing: 'traffic_signals' });
+    const unmarked = o.node(20, 0, { highway: 'crossing', crossing: 'unmarked' });
+    const bare = o.node(40, 0, { highway: 'crossing', 'crossing:markings': 'no' });
+    o.way([o.node(-60, 0), marked, lights, unmarked, bare, o.node(60, 0)], { highway: 'secondary' });
+    // A crossing of a footway alone is no street crossing.
+    o.way([o.node(-60, 30), o.node(0, 30, { highway: 'crossing', crossing: 'marked' }), o.node(60, 30)], { highway: 'footway' });
+    const roads = importRoads(o.els, box);
+    expect(roads.crossings).toHaveLength(4);
+    expect(roads.crossings![0]).toBeCloseTo(-20, 0);
+    expect(roads.crossings![2]).toBeCloseTo(0, 0);
+  });
+
   it('splits ways at shared nodes into edges between junctions', () => {
     const o = osm();
     const c = o.node(0, 0);

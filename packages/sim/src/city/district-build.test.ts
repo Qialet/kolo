@@ -228,6 +228,12 @@ describe('buildCityFromDistrict on Belgrade', () => {
     for (const n of city.nodes) if (!n.boundary && n.radius > 0 && n.in.length + n.out.length >= 3 && n.in.some((s) => !city.segments[s]!.rail)) expect(pads.has(n.id), n.name).toBe(true);
   });
 
+  it('paints the OSM crossings as zebras that vehicles stop before', () => {
+    expect(city.crossings.length).toBeGreaterThan(800);
+    const audit = auditRoads(city, real);
+    expect(audit.stopsOnZebras.length).toBeLessThanOrEqual(5);
+  });
+
   it('lays the tram tracks as rail segments joined only to each other', () => {
     expect(city.segments.filter((s) => s.rail).length).toBeGreaterThanOrEqual(40);
     expect(city.tracks.length).toBeGreaterThanOrEqual(40);

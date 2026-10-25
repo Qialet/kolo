@@ -2,7 +2,7 @@
 // Run `pnpm --filter @kolo/sim build` first; usage:
 //   node scripts/road-audit.mjs [--top 5] [--map name:x:z:size[:px-per-m] ...] [--out dir] [--district file]
 // Maps: asphalt strips (grey), junction pads (dark, red outline), lanes (white), connectors (cyan straight,
-// magenta left, green right), tracks (brown) and their curves (orange), OSM track axes (black dashes), stops (blue).
+// magenta left, green right), tracks (brown) and their curves (orange), OSM track axes (black dashes), zebras (white), stops (blue).
 // They are rasterised by playwright-core with the system Chrome (as the screenshots are).
 import { mkdirSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -55,6 +55,13 @@ async function drawMaps(maps, out) {
     const pts = [];
     for (let i = 0; i < e.pts.length; i += 2) pts.push(`${e.pts[i]},${e.pts[i + 1]}`);
     parts.push(`<polyline points="${pts.join(' ')}" fill="none" stroke="#000" stroke-width="0.2" stroke-dasharray="0.8 0.8"/>`);
+  }
+  for (const c of city.crossings) {
+    const d = { x: Math.sin(c.heading), z: Math.cos(c.heading) };
+    const r = { x: -d.z, z: d.x };
+    const corner = (t, u) => ({ x: c.x + r.x * t + d.x * u, z: c.z + r.z * t + d.z * u });
+    const box = [corner(-c.left, -1.4), corner(c.right, -1.4), corner(c.right, 1.4), corner(-c.left, 1.4)];
+    parts.push(`<path d="M${box.map(P).join('L')}Z" fill="#fff" fill-opacity="0.8" stroke="#333" stroke-width="0.15"/>`);
   }
   for (const s of city.busStops) parts.push(`<circle cx="${s.x}" cy="${s.z}" r="1.2" fill="#24c"/>`);
   const body = parts.join('');

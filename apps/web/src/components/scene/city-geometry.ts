@@ -268,7 +268,7 @@ function stopMarkings(city: City, parts: THREE.BufferGeometry[]) {
   }
 }
 
-/** Centre lines, lane lines, stop lines at unsignalised approaches and zebra crossings at junctions. */
+/** Centre lines, lane lines, stop lines at unsignalised approaches, zebra crossings and stop markings. */
 export function buildMarkingsGeometry(city: City) {
   const parts: THREE.BufferGeometry[] = [];
   for (const seg of city.segments) {
@@ -286,24 +286,11 @@ export function buildMarkingsGeometry(city: City) {
       }
     }
   }
-  // Zebra stripes just inside the junction on every leg of every real crossing.
-  for (const node of city.nodes) {
-    const ins = roadLegs(city, node.in);
-    const outs = roadLegs(city, node.out);
-    if (node.boundary || node.radius <= 0 || ins.length + outs.length < 3) continue;
-    // Roundabouts have no zebras on the ring itself (tracks rank above rings and do not count).
-    if ([...ins, ...outs].some((s) => city.segments[s]!.rank >= 10)) continue;
-    const legs = [...ins.map((s) => ({ s, end: true })), ...outs.map((s) => ({ s, end: false }))];
-    for (const { s, end } of legs) {
-      for (const l of city.segments[s]!.lanes) {
-        const lane = city.lanes[l]!;
-        const w = laneWidth(city, lane);
-        const at = end ? lane.length + 2.2 : -2.2;
-        for (let t = -w / 2 + 0.55; t < w / 2 - 0.2; t += 1.1) {
-          const p = poseAlong(lane.line, at, t);
-          parts.push(quad(0.55, 2.8, p.x, LEVEL.marking, p.z, palette.marking, p.heading));
-        }
-      }
+  // Zebras at the crossings OSM marks: stripes along the road across its whole paved width.
+  for (const c of city.crossings) {
+    const side = { x: Math.cos(c.heading), z: -Math.sin(c.heading) };
+    for (let t = -c.left + 0.55; t < c.right - 0.3; t += 1.1) {
+      parts.push(quad(0.55, 2.8, c.x - side.x * t, LEVEL.marking, c.z - side.z * t, palette.marking, c.heading));
     }
   }
   stopMarkings(city, parts);

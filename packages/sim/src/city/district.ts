@@ -166,6 +166,8 @@ export interface DistrictRoads {
   nodes: RoadNode[];
   edges: RoadEdge[];
   restrictions: TurnRestriction[];
+  /** Marked pedestrian crossings on the streets: x, z pairs. */
+  crossings?: number[];
 }
 
 export interface RoadNode {

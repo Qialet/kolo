@@ -1,5 +1,5 @@
 import type { DistrictRoads, RoadClass, RoadEdge, RoadNode, TurnRestriction } from '../city/district.js';
-import type { Rect, Vec2 } from '../geometry.js';
+import { pointInRect, type Rect, type Vec2 } from '../geometry.js';
 import { largestStronglyConnected } from '../graph.js';
 import { project, type BBoxDeg } from './project.js';
 import { toLatin } from './translit.js';
@@ -33,6 +33,8 @@ const DEFAULT_KMH: Record<RoadClass, number> = {
 const ZONE_KMH: Record<string, number> = { 'RS:urban': 50, 'RS:living_street': 10, 'RS:rural': 80, 'RS:motorway': 130 };
 const YES = new Set(['yes', 'true', '1']);
 const MAX_LANES = 5;
+/** Crossing tags meaning no paint on the road. */
+const UNMARKED = new Set(['no', 'unmarked', 'informal']);
 
 export function boundsOfBBox(b: BBoxDeg): Rect {
   const nw = project({ lat: b.n, lon: b.w });
@@ -296,7 +298,28 @@ export function importRoads(elements: OsmElement[], bbox: BBoxDeg): DistrictRoad
     e.b = newId.get(e.b)!;
   });
 
-  return { nodes: kept, edges, restrictions: restrictionsOf(elements, kept, edges) };
+  return { nodes: kept, edges, restrictions: restrictionsOf(elements, kept, edges), crossings: crossingsOf(ways, edges, osmNodes, pos, bounds) };
+}
+
+/** Marked pedestrian crossings on the streets kept (tracks left out), inside the frame: x, z pairs. */
+function crossingsOf(ways: WayInfo[], edges: RoadEdge[], osmNodes: Map<number, OsmElement>, pos: (id: number) => Vec2, bounds: Rect): number[] {
+  const kept = new Set(edges.filter((e) => e.cls !== 'tram').map((e) => e.osm));
+  const seen = new Set<number>();
+  const out: number[] = [];
+  for (const w of ways) {
+    if (!kept.has(w.id)) continue;
+    for (const id of w.nodes) {
+      const t = osmNodes.get(id)?.tags;
+      if (!t || seen.has(id)) continue;
+      const crossing = t.highway === 'crossing' || (t.highway === 'traffic_signals' && !!t.crossing);
+      if (!crossing || UNMARKED.has(t.crossing ?? '') || t['crossing:markings'] === 'no') continue;
+      const p = pos(id);
+      if (!pointInRect(p, bounds)) continue;
+      seen.add(id);
+      out.push(round1(p.x), round1(p.z));
+    }
+  }
+  return out;
 }
 
 const round1 = (v: number) => Math.round(v * 10) / 10 + 0;

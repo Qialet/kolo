@@ -9,6 +9,7 @@ import {
   norm,
   polyline,
   polylinesConflict,
+  projectOnPolyline,
   quadBezier,
   scale,
   startTangent,
@@ -24,7 +25,7 @@ import { buildTwins } from './corridors.js';
 import { layoutDepots } from './depots.js';
 import { addPlaces, parkCars } from './places.js';
 import { applySigns } from './signs.js';
-import { laySurface, offsetPoints, pointAt, trimToJunctions, type SurfaceRoad } from './surface.js';
+import { laySurface, offsetPoints, placeCrossings, pointAt, trimToJunctions, type SurfaceRoad } from './surface.js';
 import { addTransit } from './transit-places.js';
 import type { City, CityNode, Connector, Lane, Segment, Street, Turn } from './types.js';
 
@@ -147,6 +148,7 @@ export function buildCityFromDistrict(district: District): City {
     connectors: [],
     roads: [],
     pads: [],
+    crossings: [],
     tracks: [],
     areas: [],
     buildings: [],
@@ -476,12 +478,28 @@ export function buildCityFromDistrict(district: District): City {
     const twoWay = e.lanesFwd > 0 && e.lanesBwd > 0;
     const half = ((e.lanesFwd + e.lanesBwd) * w) / 2;
     const [from, to] = [city.nodes[seg.from]!, city.nodes[seg.to]!];
-    surfaceRoads.push({ base: info[seg.id]!.base, from, to, left: twoWay ? e.lanesBwd * w : half, right: twoWay ? e.lanesFwd * w : half, layer: e.src.layer });
+    const base = info[seg.id]!.base;
+    // Where the lanes meet each junction: the ends of those running in, else the starts of those leaving.
+    const back = seg.reverse >= 0 ? city.segments[seg.reverse] : undefined;
+    const at = (s: Segment | undefined, end: boolean) => (s ? s.lanes.map((l) => projectOnPolyline(base, end ? city.lanes[l]!.end : city.lanes[l]!.start)) : []);
+    const intoTo = at(seg, true);
+    const intoFrom = back ? at(back, true) : at(seg, false);
+    surfaceRoads.push({
+      base,
+      from,
+      to,
+      left: twoWay ? e.lanesBwd * w : half,
+      right: twoWay ? e.lanesFwd * w : half,
+      layer: e.src.layer,
+      stopFrom: Math.min(...intoFrom),
+      stopTo: Math.max(...intoTo),
+    });
   }
   // A junction pad needs two streets meeting; elsewhere the street runs on to the node.
   const surface = laySurface(city, surfaceRoads, (n) => !n.boundary && n.radius > 0 && roadDegreeOf.get(n.id)! >= 2);
   city.roads = surface.strips;
   city.pads = surface.pads;
+  city.crossings = placeCrossings(roads.crossings ?? [], surfaceRoads, surface.spans);
   addPlaces(city, district);
   addTransit(city, district.transit);
   layoutDepots(city, district.depotSites);

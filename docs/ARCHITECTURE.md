@@ -11,7 +11,7 @@
 ## Данные реального города
 - Сырьё (выгрузка Overpass, GTFS data.gov.rs) лежит в data/raw вне git; скачивание — только с разрешения пользователя.
 - Импорт: packages/sim/src/import (подпуть @kolo/sim/import, в веб не попадает), CLI packages/sim/scripts/import-district.mjs после сборки sim пишет data/districts/belgrade-center.json.
-- Файл района: meta (опорная точка, рамка, дата снимка OSM, версия GTFS, хэш версии FNV-1a), roads (узлы, рёбра с полосами и тегами, запреты поворотов) и transit (календарь, остановки, линии, варианты с shape, профили времён и отправления по сервисам); типы — packages/sim/src/city/district.ts.
+- Файл района: meta (опорная точка, рамка, дата снимка OSM, версия GTFS, хэш версии FNV-1a), roads (узлы, рёбра с полосами и тегами, запреты поворотов, размеченные пешеходные переходы) и transit (календарь, остановки, линии, варианты с shape, профили времён и отправления по сервисам); типы — packages/sim/src/city/district.ts.
 - Файл района также несёт здания, площади, деревья, адреса, POI (у площадных — контур) и площадки депо (импорт osm-places.ts, список депо DEPOT_SITES).
 - buildCityFromDistrict превращает файл в City (граф, места, дворы депо) примерно за 0,3 с.
 - Web: scripts/sync-districts.mjs перед dev и build копирует файлы в public/districts/<id>.<version>.json и пишет manifest.json (папка вне git); lib/city грузит manifest без кэша, файл — из кэша браузера.
