@@ -57,4 +57,4 @@
 ### Задача 4: доки, проверка, слияние
 **Файлы:** docs/SIMULATION.md, docs/DESIGN.md, docs/ARCHITECTURE.md (биты flags, если описаны), docs/ROADMAP.md.
 - SIMULATION, «Движение»: перестроения, правила и зоны; «Известные упрощения» — убрать «нет перестроений». DESIGN — поворотники. ROADMAP: пункт перестроений отмечен, «где продолжать» — план 8 влит, дальше 9. Каждый файл до 100 строк.
-- [ ] pnpm test, pnpm build, pnpm lint (web) зелёные; коммит docs: lane changes; слияние в main fast-forward, тесты на main, ветка удалена.
+- [x] pnpm test, pnpm build, pnpm lint (web) зелёные; коммит docs: lane changes; слияние в main fast-forward, тесты на main, ветка удалена.
