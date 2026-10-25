@@ -1,4 +1,4 @@
-import { poseAlong, type AreaKind, type Building, type City, type Lane, type Vec2 } from '@kolo/sim';
+import { BAY_BACK, BAY_FWD, BAY_TAPER_IN, BAY_WIDTH, poseAlong, type AreaKind, type Building, type BusStop, type City, type Lane, type Vec2 } from '@kolo/sim';
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { chunkCells } from '@/lib/lod';
@@ -185,6 +185,37 @@ export function buildGroundGeometry(city: City) {
 }
 
 /** Asphalt: a ribbon per road and the convex hull of the lane ends at every junction. */
+/** Stops at a kerb (not on a track), with their curb lane and the kerb's offset from its centre. */
+function curbStops(city: City) {
+  return city.busStops
+    .filter((stop) => !isRail(city, stop.lane))
+    .map((stop) => {
+      const lane = city.lanes[stop.lane]!;
+      return { stop, lane, kerb: laneWidth(city, lane) / 2 };
+    });
+}
+
+/** Span of a stop's bay along its lane (clipped to the lane) and the bay's width beyond the kerb at `at`. */
+function bayAt(stop: BusStop, lane: Lane) {
+  const start = stop.s - BAY_BACK;
+  const end = stop.s + BAY_FWD;
+  const width = (at: number) => BAY_WIDTH * Math.max(0, Math.min(1, (at - start) / BAY_TAPER_IN, (end - at) / BAY_FWD));
+  return { s0: Math.max(0, start), s1: Math.min(lane.length, end), full: start + BAY_TAPER_IN, width };
+}
+
+/** Bay outline: the kerb line from the start of the bay to its end, back along its tapered outer edge. */
+function bayOutline(stop: BusStop, lane: Lane, kerb: number): Vec2[] {
+  const { s0, s1, width } = bayAt(stop, lane);
+  const inner: Vec2[] = [];
+  const outer: Vec2[] = [];
+  for (let at = s0; ; at = Math.min(s1, at + 1)) {
+    inner.push(poseAlong(lane.line, at, kerb - 0.05));
+    outer.push(poseAlong(lane.line, at, kerb + width(at)));
+    if (at >= s1) break;
+  }
+  return [...inner, ...outer.reverse()];
+}
+
 export function buildRoadGeometry(city: City) {
   const parts: THREE.BufferGeometry[] = [];
   for (const r of city.roads) {
@@ -202,6 +233,8 @@ export function buildRoadGeometry(city: City) {
     const hull = convexHull(pts);
     if (hull.length >= 3) parts.push(flatPolygon(hull, [], LEVEL.road + 0.001, palette.asphalt));
   }
+  // Bus bays cut into the sidewalk, just under the street's own asphalt where they meet.
+  for (const { stop, lane, kerb } of curbStops(city)) if (stop.bay) parts.push(flatPolygon(bayOutline(stop, lane, kerb), [], LEVEL.road - 0.002, palette.asphalt));
   return merge(parts);
 }
 
@@ -210,6 +243,35 @@ function dashes(parts: THREE.BufferGeometry[], lane: Lane, lateral: number, dash
   for (let s = 1.5; s + dash < lane.length - 1; s += dash + gap) {
     const p = poseAlong(lane.line, s + dash / 2, lateral);
     parts.push(quad(0.14, dash, p.x, LEVEL.marking, p.z, palette.marking, p.heading));
+  }
+}
+
+/** Zigzag line `lateral` metres right of a lane, swinging `swing` metres further across, from s0 to s1. */
+function zigzag(parts: THREE.BufferGeometry[], lane: Lane, s0: number, s1: number, lateral: number, swing: number, color: string) {
+  const step = 1.5;
+  let prev = poseAlong(lane.line, s0, lateral);
+  for (let k = 1; s0 + k * step <= s1; k++) {
+    const p = poseAlong(lane.line, s0 + k * step, lateral + (k % 2 ? swing : 0));
+    const dx = p.x - prev.x;
+    const dz = p.z - prev.z;
+    parts.push(quad(0.12, Math.hypot(dx, dz) + 0.06, (p.x + prev.x) / 2, LEVEL.marking, (p.z + prev.z) / 2, color, Math.atan2(dx, dz)));
+    prev = p;
+  }
+}
+
+/** Stop markings in the stops' cobalt: a zigzag at the kerb where buses stand in the lane; at a bay a broken line along the lane edge and the zigzag inside the bay. */
+function stopMarkings(city: City, parts: THREE.BufferGeometry[]) {
+  for (const { stop, lane, kerb } of curbStops(city)) {
+    if (!stop.bay) {
+      zigzag(parts, lane, Math.max(0.5, stop.s - 18), stop.s, kerb - 0.25, -0.6, palette.bus);
+      continue;
+    }
+    const { s0, s1, full } = bayAt(stop, lane);
+    for (let at = s0 + 0.5; at + 1 <= s1; at += 2) {
+      const p = poseAlong(lane.line, at + 0.5, kerb);
+      parts.push(quad(0.15, 1, p.x, LEVEL.marking, p.z, palette.bus, p.heading));
+    }
+    zigzag(parts, lane, Math.max(s0, full), stop.s, kerb + BAY_WIDTH - 0.25, -0.6, palette.bus);
   }
 }
 
@@ -251,6 +313,7 @@ export function buildMarkingsGeometry(city: City) {
       }
     }
   }
+  stopMarkings(city, parts);
   return merge(parts);
 }
 

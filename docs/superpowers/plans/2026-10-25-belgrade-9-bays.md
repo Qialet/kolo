@@ -49,8 +49,8 @@
 
 ### Задача 4: карманы в сцене
 **Файлы:** apps/web/src/components/scene/city-geometry.ts, city-static.tsx (если нужен новый слой), lib/palette.ts.
-- [ ] Асфальт кармана, линия кармана и зигзаг остановок без кармана; навес из BusStop (уже сдвинут в sim); pnpm lint и pnpm build чистые.
-- [ ] Скриншоты playwright-core: автобус в кармане на Kneza Miloša, автобус в полосе на местной улице с машиной за ним; pnpm perf --budget в бюджете; коммит feat(web): bus bays in the scene.
+- [x] Асфальт кармана, линия кармана и зигзаг остановок без кармана; навес из BusStop (уже сдвинут в sim); pnpm lint и pnpm build чистые.
+- [x] Скриншоты playwright-core: карманы на Kneza Miloša (London, Admirala Geprata) и Takovska, автобус в полосе на Vase Čarapića с такси за ним; позы автобусов в карманах в кадре сверены с точкой остановки (0,5 м). На Kneza Miloša асфальт OSM-дороги шире полос, карман в нём не выделяется. pnpm perf --budget: ok (кадр 5,6–5,8 мс); коммит feat(web): bus bays in the scene.
 
 ### Задача 5: доки, проверка, слияние
 **Файлы:** docs/SIMULATION.md, docs/DESIGN.md, docs/ROADMAP.md.

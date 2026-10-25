@@ -4,7 +4,7 @@ export * from './city/types.js';
 export type * from './city/district.js';
 export { lanePoint } from './city/lanes.js';
 export { buildCityFromDistrict, laneWidthOf } from './city/district-build.js';
-export { stopPickup } from './city/transit-places.js';
+export { BAY_BACK, BAY_FWD, BAY_TAPER_IN, BAY_WIDTH, stopPickup, stopPickupS } from './city/transit-places.js';
 export * from './engine/signals.js';
 export { chooseLanes, routeSegments, laneIndexesFor, turnBetween } from './engine/routing.js';
 export { TrafficSystem, makeVehicle, type Vehicle, type PathStep } from './engine/traffic.js';
