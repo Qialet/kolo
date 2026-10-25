@@ -298,7 +298,26 @@ export function importRoads(elements: OsmElement[], bbox: BBoxDeg): DistrictRoad
     e.b = newId.get(e.b)!;
   });
 
-  return { nodes: kept, edges, restrictions: restrictionsOf(elements, kept, edges), crossings: crossingsOf(ways, edges, osmNodes, pos, bounds) };
+  return {
+    nodes: kept,
+    edges,
+    restrictions: restrictionsOf(elements, kept, edges),
+    crossings: crossingsOf(ways, edges, osmNodes, pos, bounds),
+    scenery: sceneryTracks(elements, osmNodes, pos, bounds),
+  };
+}
+
+/** Tracks at ground level or above that no tram runs on in the model: tram yards, sidings, two-way track and the railway. */
+function sceneryTracks(elements: OsmElement[], osmNodes: Map<number, OsmElement>, pos: (id: number) => Vec2, bounds: Rect): number[][] {
+  const out: number[][] = [];
+  for (const e of elements) {
+    const t = e.tags;
+    if (e.type !== 'way' || !e.nodes || !t || t.tunnel === 'yes') continue;
+    if (t.railway !== 'rail' && (t.railway !== 'tram' || trackInfo(e.id, e.nodes, t))) continue;
+    if (e.nodes.some((id) => !osmNodes.has(id))) continue;
+    for (const run of clipRuns(e.nodes.map((id) => ({ ...pos(id), key: null })), bounds)) out.push(run.flatMap((p) => [round1(p.x), round1(p.z)]));
+  }
+  return out;
 }
 
 /** Marked pedestrian crossings on the streets kept (tracks left out), inside the frame: x, z pairs. */

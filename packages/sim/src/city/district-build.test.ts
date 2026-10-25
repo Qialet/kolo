@@ -234,6 +234,13 @@ describe('buildCityFromDistrict on Belgrade', () => {
     expect(audit.stopsOnZebras.length).toBeLessThanOrEqual(5);
   });
 
+  it('lays the track curves along the OSM tracks and nowhere else', () => {
+    // Before: 34 curves strayed from the tracks by up to 4.4 m, and 16 led where no switch is.
+    const audit = auditRoads(city, real);
+    expect(audit.railOffTrack).toHaveLength(0);
+    expect(city.tracks.filter((t) => t.scenery).length).toBeGreaterThanOrEqual(20);
+  });
+
   it('lays the tram tracks as rail segments joined only to each other', () => {
     expect(city.segments.filter((s) => s.rail).length).toBeGreaterThanOrEqual(40);
     expect(city.tracks.length).toBeGreaterThanOrEqual(40);

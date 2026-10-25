@@ -139,10 +139,11 @@ export interface Area {
   holes: Vec2[][];
 }
 
-/** Axis of one tram track between junctions, for rails and the overhead wire. */
+/** Axis of one tram track between junctions, or of a track no tram runs on (yards, the railway), drawn only. */
 export interface Track {
   points: Vec2[];
   layer: number;
+  scenery?: true;
 }
 
 /** Asphalt of one road between junction pads: its centre line cut at the pads and the paved width on each side. */

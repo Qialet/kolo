@@ -9,6 +9,7 @@ import {
   norm,
   polyline,
   polylinesConflict,
+  poseAlong,
   projectOnPolyline,
   quadBezier,
   scale,
@@ -25,7 +26,7 @@ import { buildTwins } from './corridors.js';
 import { layoutDepots } from './depots.js';
 import { addPlaces, parkCars } from './places.js';
 import { applySigns } from './signs.js';
-import { laySurface, offsetPoints, placeCrossings, pointAt, trimToJunctions, type SurfaceRoad } from './surface.js';
+import { laySurface, offsetPoints, placeCrossings, pointAt, slice, trimToJunctions, type SurfaceRoad } from './surface.js';
 import { addTransit } from './transit-places.js';
 import type { City, CityNode, Connector, Lane, Segment, Street, Turn } from './types.js';
 
@@ -43,6 +44,8 @@ const CONFLICT_CLEARANCE = 1.6;
 const ROUND_BEND = (35 * Math.PI) / 180;
 /** Centre-line radius of a rounded bend, unless the road pieces around it are too short. */
 const BEND_RADIUS = 8;
+/** Sharpest bend a tram takes through a switch or across another track. */
+const SWITCH_COS = Math.cos((60 * Math.PI) / 180);
 /** Junction circle radius per metre of kerb shift where a road changes width: a taper of 1 in 8. */
 const TAPER = 4;
 const TAPER_MAX = 15;
@@ -132,6 +135,13 @@ export function buildCityFromDistrict(district: District): City {
     cluster.set(ca, members);
     cluster.delete(cb);
     for (const m of members) clusterOf.set(m, ca);
+  }
+  // Tracks inside a junction keep their OSM course for the track curves between its approaches.
+  const innerTracks = new Map<number, WorkEdge[]>();
+  for (const e of edges.values()) {
+    if (e.src.cls !== 'tram' || clusterOf.get(e.a) !== clusterOf.get(e.b)) continue;
+    const key = clusterOf.get(e.a)!;
+    innerTracks.set(key, [...(innerTracks.get(key) ?? []), e]);
   }
   // Roads inside one junction disappear; the junction's connectors replace them.
   for (const e of [...edges.values()]) if (clusterOf.get(e.a) === clusterOf.get(e.b)) edges.delete(e.id);
@@ -411,6 +421,54 @@ export function buildCityFromDistrict(district: District): City {
     } else banned.add(`${fromSeg.id}>${toSeg.id}`);
   }
 
+  /**
+   * OSM course of the track from the end of one rail segment to the start of another through their
+   * junction (empty when they meet at one OSM node), or null when no track joins them there. A tram
+   * runs on through a switch or a crossing only where the track bends less than SWITCH_BEND.
+   */
+  const trackCourse = (sIn: Segment, sOut: Segment): Vec2[] | null => {
+    const a = info[sIn.id]!;
+    const b = info[sOut.id]!;
+    const u = a.forward ? a.edge.b : a.edge.a;
+    const v = b.forward ? b.edge.a : b.edge.b;
+    const arrive = trackDir(a.base.points, false);
+    const leave = trackDir(b.base.points, true);
+    if (u === v) return dot(arrive, leave) > SWITCH_COS ? [] : null;
+    // Pieces of the junction's own tracks in their direction of travel.
+    const ways = (innerTracks.get(clusterOf.get(u)!) ?? []).flatMap((e) => {
+      const out: { from: number; to: number; pts: Vec2[]; len: number }[] = [];
+      if (e.lanesFwd > 0) out.push({ from: e.a, to: e.b, pts: e.pts, len: polyline(e.pts).length });
+      if (e.lanesBwd > 0) out.push({ from: e.b, to: e.a, pts: [...e.pts].reverse(), len: polyline(e.pts).length });
+      return out;
+    });
+    const runsOn = (from: Vec2, pts: Vec2[]) => dot(from, trackDir(pts, true)) > SWITCH_COS;
+    // Shortest chain of pieces (a handful: plain relaxation over pieces, each entered straight enough).
+    const best = new Map<number, { len: number; pts: Vec2[] }>();
+    ways.forEach((w, i) => {
+      if (w.from === u && runsOn(arrive, w.pts)) best.set(i, { len: w.len, pts: w.pts });
+    });
+    for (let round = 0, changed = true; changed && round <= ways.length; round++) {
+      changed = false;
+      ways.forEach((w, i) => {
+        const at = best.get(i);
+        if (!at) return;
+        ways.forEach((next, j) => {
+          if (next.from !== w.to || !runsOn(trackDir(w.pts, false), next.pts)) return;
+          const len = at.len + next.len;
+          if ((best.get(j)?.len ?? Infinity) <= len) return;
+          best.set(j, { len, pts: [...at.pts, ...next.pts] });
+          changed = true;
+        });
+      });
+    }
+    let found: { len: number; pts: Vec2[] } | null = null;
+    ways.forEach((w, i) => {
+      const at = best.get(i);
+      if (at && w.to === v && dot(trackDir(w.pts, false), leave) > SWITCH_COS && (!found || at.len < found.len)) found = at;
+    });
+    return found ? (found as { pts: Vec2[] }).pts : null;
+  };
+
   // ── connectors ──
   for (const node of city.nodes) {
     const created: Connector[] = [];
@@ -429,6 +487,12 @@ export function buildCityFromDistrict(district: District): City {
       const lanesIn = sIn.lanes.map((l) => city.lanes[l]!);
       const marks = parseTurnLanes(info[inId]!.turn, lanesIn.length);
       for (const { sOut, turn } of moves) {
+        if (sIn.rail) {
+          // Trams take only the curves OSM lays: none where the tracks merely cross.
+          const course = trackCourse(sIn, sOut);
+          if (course) created.push(connectTrack(city, node, lanesIn[0]!, city.lanes[sOut.lanes[0]!]!, turn, sIn, sOut, [info[inId]!.base, course, info[sOut.id]!.base]));
+          continue;
+        }
         const lanesOut = sOut.lanes.map((l) => city.lanes[l]!);
         for (const [i, j] of laneMoves(turn, lanesIn.length, lanesOut.length, marks)) {
           created.push(connect(city, node, lanesIn[i]!, lanesOut[j]!, turn, sIn, sOut));
@@ -464,6 +528,9 @@ export function buildCityFromDistrict(district: District): City {
   void signalPoints;
   for (const id of largestCarScc(city)) city.segments[id]!.core = true;
   buildTwins(city);
+  for (const flat of roads.scenery ?? []) {
+    city.tracks.push({ points: Array.from({ length: flat.length / 2 }, (_, i) => ({ x: flat[2 * i]!, z: flat[2 * i + 1]! })), layer: 0, scenery: true });
+  }
   const surfaceRoads: SurfaceRoad[] = [];
   for (const e of edges.values()) {
     if (e.src.cls === 'tram') {
@@ -618,6 +685,15 @@ function foldPassThrough(edges: Map<number, WorkEdge>, boundary: Set<number>, si
 
 // ───────────────────────────── geometry ─────────────────────────────
 
+/** Direction of a track at its start (or end) over its first (last) few metres. */
+function trackDir(pts: Vec2[], atStart: boolean): Vec2 {
+  const line = polyline(pts);
+  const span = Math.min(4, line.length);
+  const p = atStart ? pointAt(line, 0) : pointAt(line, line.length - span);
+  const q = atStart ? pointAt(line, span) : pointAt(line, line.length);
+  return norm(sub(q, p));
+}
+
 /** Rounds every bend sharper than ROUND_BEND into a curve of BEND_RADIUS, within half of each piece around it. */
 function roundCorners(raw: Vec2[]): Vec2[] {
   // OSM may repeat a point: a zero-length piece has no direction.
@@ -707,6 +783,34 @@ function laneMoves(turn: Turn, nIn: number, nOut: number, marks: Set<Turn>[] | n
   return out;
 }
 
+/**
+ * Track curve along the OSM course: the rest of the incoming track past its lane, the course through
+ * the junction and the outgoing track up to its lane. The speed is held to the tightest bend.
+ */
+function connectTrack(city: City, node: CityNode, inLane: Lane, outLane: Lane, turn: Turn, sIn: Segment, sOut: Segment, [baseIn, course, baseOut]: [Polyline, Vec2[], Polyline]): Connector {
+  const tail = slice(baseIn, projectOnPolyline(baseIn, inLane.end), baseIn.length).points;
+  const head = slice(baseOut, 0, projectOnPolyline(baseOut, outLane.start)).points;
+  const points = [inLane.end, ...tail, ...course, ...head, outLane.start].filter((p, i, all) => i === 0 || dist(p, all[i - 1]!) > 0.05);
+  const line = polyline(points.length > 1 ? points : [inLane.end, outLane.start]);
+  // Bend radius through points 3 m apart along the curve.
+  let r = Infinity;
+  for (let s = 3; s + 3 <= line.length; s += 1) {
+    const [a, b, c] = [poseAlong(line, s - 3), poseAlong(line, s), poseAlong(line, s + 3)];
+    const area2 = Math.abs(cross(sub(b, a), sub(c, a)));
+    if (area2 > 1e-6) r = Math.min(r, (dist(a, b) * dist(b, c) * dist(a, c)) / (2 * area2));
+  }
+  const vmax = Math.max(3.5, Math.min(sIn.speed, sOut.speed, Math.sqrt(2.4 * r)));
+  return addConnector(city, node, inLane, outLane, turn, sIn, line, vmax);
+}
+
+function addConnector(city: City, node: CityNode, inLane: Lane, outLane: Lane, turn: Turn, sIn: Segment, line: Polyline, vmax: number): Connector {
+  const conn: Connector = { id: city.connectors.length, node: node.id, from: inLane.id, to: outLane.id, turn, phase: sIn.phase, line, vmax, conflicts: [] };
+  city.connectors.push(conn);
+  inLane.out.push(conn.id);
+  outLane.in.push(conn.id);
+  return conn;
+}
+
 function connect(city: City, node: CityNode, inLane: Lane, outLane: Lane, turn: Turn, sIn: Segment, sOut: Segment): Connector {
   const p0 = inLane.end;
   const p1 = outLane.start;
@@ -736,19 +840,5 @@ function connect(city: City, node: CityNode, inLane: Lane, outLane: Lane, turn: 
       vmax = Math.max(3.5, Math.min(vmax, Math.sqrt(2.4 * Math.max(1, chord / 2))));
     }
   }
-  const conn: Connector = {
-    id: city.connectors.length,
-    node: node.id,
-    from: inLane.id,
-    to: outLane.id,
-    turn,
-    phase: sIn.phase,
-    line: polyline(points),
-    vmax,
-    conflicts: [],
-  };
-  city.connectors.push(conn);
-  inLane.out.push(conn.id);
-  outLane.in.push(conn.id);
-  return conn;
+  return addConnector(city, node, inLane, outLane, turn, sIn, polyline(points), vmax);
 }

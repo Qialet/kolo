@@ -1,4 +1,19 @@
-import { BAY_BACK, BAY_FWD, BAY_TAPER_IN, BAY_WIDTH, poseAlong, type AreaKind, type Building, type BusStop, type City, type Lane, type Vec2 } from '@kolo/sim';
+import {
+  BAY_BACK,
+  BAY_FWD,
+  BAY_TAPER_IN,
+  BAY_WIDTH,
+  polyline,
+  poseAlong,
+  roadSurface,
+  type AreaKind,
+  type Building,
+  type BusStop,
+  type City,
+  type Lane,
+  type Polyline,
+  type Vec2,
+} from '@kolo/sim';
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { chunkCells } from '@/lib/lod';
@@ -532,22 +547,6 @@ const WIRE_STEP = 4;
 const railLanes = (city: City) => city.lanes.filter((l) => city.segments[l.seg]!.rail && city.segments[l.seg]!.layer >= 0);
 const railConnectors = (city: City) => city.connectors.filter((c) => isRail(city, c.from) && city.segments[city.lanes[c.from]!.seg]!.layer >= 0);
 
-/** Stretches of a lane not lying on a street lane (outside its twins). */
-function ownSpans(lane: Lane): [number, number][] {
-  const shared = (lane.twins ?? []).map((t) => [t.s0, t.s1] as const).sort((a, b) => a[0] - b[0]);
-  const out: [number, number][] = [];
-  let at = 0;
-  for (const [s0, s1] of shared) {
-    if (s0 > at) out.push([at, s0]);
-    at = Math.max(at, s1);
-  }
-  if (at < lane.length) out.push([at, lane.length]);
-  return out.filter(([a, b]) => b - a > 0.5);
-}
-
-/** Lane shares its first / last metre with a street lane. */
-const sharedAt = (lane: Lane, s: number) => (lane.twins ?? []).some((t) => t.s0 <= s + 1 && t.s1 >= s - 1);
-
 /** Points of a polyline between a and b, every 2 m. */
 function slice(line: Lane['line'], a: number, b: number): Vec2[] {
   const pts: Vec2[] = [];
@@ -573,8 +572,9 @@ export const platformOf = (city: City, stop: City['busStops'][number]) => {
 };
 
 /**
- * Tram tracks: two rails along every track lane and junction curve, a ballast bed where the
- * track runs on its own (not on a street lane) and a platform at stops served only by trams.
+ * Tram tracks: two rails along every track lane, junction curve and scenery track (yards, the
+ * railway), a ballast bed wherever the track runs clear of the asphalt, and a platform at stops
+ * served only by trams.
  */
 export function buildTrackGeometry(city: City) {
   const rails: THREE.BufferGeometry[] = [];
@@ -591,15 +591,32 @@ export function buildTrackGeometry(city: City) {
     const g = ribbon(points, BALLAST_HALF, BALLAST_HALF, LEVEL.ballast, palette.ballast);
     if (g) ballast.push(g);
   };
+  const onRoad = roadSurface(city);
+  /** The bed along a line, metre by metre, where its axis leaves the asphalt. */
+  const bedAlong = (line: Polyline) => {
+    let start = -1;
+    for (let s = 0; ; s = Math.min(line.length, s + 1)) {
+      const clear = !onRoad(poseAlong(line, s));
+      if (clear && start < 0) start = s;
+      if (start >= 0 && (!clear || s >= line.length)) {
+        if (s - start > 1) bed(slice(line, start, s));
+        start = -1;
+      }
+      if (s >= line.length) break;
+    }
+  };
   for (const lane of railLanes(city)) {
     lay(lane.line.points);
-    for (const [a, b] of ownSpans(lane)) bed(slice(lane.line, a, b));
+    bedAlong(lane.line);
   }
   for (const c of railConnectors(city)) {
     lay(c.line.points);
-    const from = city.lanes[c.from]!;
-    const to = city.lanes[c.to]!;
-    if (!sharedAt(from, from.length) && !sharedAt(to, 0)) bed(c.line.points);
+    bedAlong(c.line);
+  }
+  for (const t of city.tracks) {
+    if (!t.scenery) continue;
+    lay(t.points);
+    bedAlong(polyline(t.points));
   }
   for (const stop of city.busStops) {
     const p = platformOf(city, stop);

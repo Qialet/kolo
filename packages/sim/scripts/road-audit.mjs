@@ -2,7 +2,7 @@
 // Run `pnpm --filter @kolo/sim build` first; usage:
 //   node scripts/road-audit.mjs [--top 5] [--map name:x:z:size[:px-per-m] ...] [--out dir] [--district file]
 // Maps: asphalt strips (grey), junction pads (dark, red outline), lanes (white), connectors (cyan straight,
-// magenta left, green right), tracks (brown) and their curves (orange), OSM track axes (black dashes), zebras (white), stops (blue).
+// magenta left, green right), tracks (brown) and their curves (orange), scenery tracks (light brown), OSM track axes (black dashes), zebras (white), stops (blue).
 // They are rasterised by playwright-core with the system Chrome (as the screenshots are).
 import { mkdirSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -56,6 +56,7 @@ async function drawMaps(maps, out) {
     for (let i = 0; i < e.pts.length; i += 2) pts.push(`${e.pts[i]},${e.pts[i + 1]}`);
     parts.push(`<polyline points="${pts.join(' ')}" fill="none" stroke="#000" stroke-width="0.2" stroke-dasharray="0.8 0.8"/>`);
   }
+  for (const t of city.tracks) if (t.scenery) parts.push(`<polyline points="${t.points.map(P).join(' ')}" fill="none" stroke="#b07a4a" stroke-width="0.9"/>`);
   for (const c of city.crossings) {
     const d = { x: Math.sin(c.heading), z: Math.cos(c.heading) };
     const r = { x: -d.z, z: d.x };

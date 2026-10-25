@@ -48,6 +48,20 @@ describe('toLatin', () => {
 });
 
 describe('importRoads', () => {
+  it('keeps the tracks no tram runs on as scenery', () => {
+    const o = osm();
+    o.way([o.node(-50, 0), o.node(50, 0)], { railway: 'tram', oneway: 'yes' });
+    o.way([o.node(-50, 10), o.node(0, 12), o.node(50, 10)], { railway: 'tram', service: 'yard' });
+    o.way([o.node(-50, 20), o.node(50, 20)], { railway: 'tram' });
+    o.way([o.node(-50, 30), o.node(50, 30)], { railway: 'rail', usage: 'main' });
+    o.way([o.node(-50, 40), o.node(50, 40)], { railway: 'tram', service: 'siding', tunnel: 'yes' });
+    o.way([o.node(-50, 50), o.node(50, 50)], { railway: 'disused' });
+    const roads = importRoads(o.els, box);
+    expect(roads.edges.filter((e) => e.cls === 'tram')).toHaveLength(1);
+    expect(roads.scenery).toHaveLength(3);
+    expect(roads.scenery![0]).toHaveLength(6);
+  });
+
   it('keeps the marked pedestrian crossings of the streets', () => {
     const o = osm();
     const marked = o.node(-20, 0, { highway: 'crossing', crossing: 'uncontrolled' });

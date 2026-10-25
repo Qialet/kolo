@@ -168,6 +168,8 @@ export interface DistrictRoads {
   restrictions: TurnRestriction[];
   /** Marked pedestrian crossings on the streets: x, z pairs. */
   crossings?: number[];
+  /** Tracks no tram runs on in the model (yards, sidings, two-way track, the railway), drawn only: x, z pairs per track. */
+  scenery?: number[][];
 }
 
 export interface RoadNode {

@@ -3,6 +3,7 @@ export * from './rng.js';
 export * from './city/types.js';
 export type * from './city/district.js';
 export { lanePoint } from './city/lanes.js';
+export { roadSurface } from './city/places.js';
 export { buildCityFromDistrict, laneWidthOf } from './city/district-build.js';
 export { auditRoads, type RoadAudit, type RoadCheck, type RoadDefect } from './city/road-audit.js';
 export { BAY_BACK, BAY_FWD, BAY_TAPER_IN, BAY_WIDTH, stopPickup, stopPickupS } from './city/transit-places.js';
