@@ -32,6 +32,8 @@ export interface CityNode {
   z: number;
   /** Radius of the junction area: lanes end where they leave this circle. */
   radius: number;
+  /** Height above the street of a junction on a bridge deck (city/decks); absent at street level. */
+  y?: number;
   in: number[];
   out: number[];
   signal: SignalPlan | null;
@@ -62,6 +64,8 @@ export interface Segment {
   phase: number;
   /** OSM layer: below 0 a tunnel, above 0 a bridge deck; 0 is street level. */
   layer: number;
+  /** Heights of a bridge deck along the centre line every DECK_SAMPLE m from `from`, the last at `length` (city/decks). */
+  y?: number[];
   /** Bus / trolleybus only: cars never route over it. */
   psvOnly?: boolean;
   /** Has trolleybus wires overhead. */
@@ -91,6 +95,8 @@ export interface Lane {
   in: number[];
   /** Stretches shared with a lane lying on top of this one (a tram track on a street lane). */
   twins?: Twin[];
+  /** Heights on a bridge deck every DECK_SAMPLE m from the start, the last at `length` (city/decks). */
+  y?: number[];
 }
 
 /** Positions [s0, s1] of a lane map linearly onto [t0, t1] of the twin `lane`: vehicles on one see those on the other. */
@@ -162,6 +168,8 @@ export interface RoadStrip {
   right: number;
   /** OSM layer: tunnels (below 0) are not drawn over the blocks above them. */
   layer: number;
+  /** Height of each point on a bridge deck. */
+  y?: number[];
 }
 
 /** Asphalt of a junction: the mouths of its roads joined by kerb returns. */
@@ -172,6 +180,8 @@ export interface JunctionPad {
   island?: Vec2[];
   /** Highest OSM layer among its roads. */
   layer: number;
+  /** Height on a bridge deck: its node's. */
+  y?: number;
 }
 
 /** A zebra across a road: its middle on the road's axis, the axis direction and the paved width to each side. */

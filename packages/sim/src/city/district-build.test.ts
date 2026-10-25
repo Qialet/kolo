@@ -8,6 +8,7 @@ import { buildCityFromDistrict } from './district-build.js';
 import { pointInPolygon } from '../import/polygons.js';
 import { findRings } from './rings.js';
 import { auditRoads } from './road-audit.js';
+import { laneY } from './decks.js';
 import type { City } from './types.js';
 
 /** Processor time of this test process in ms: unlike the wall clock it does not grow when other test processes compete for the CPU. */
@@ -230,6 +231,25 @@ describe('buildCityFromDistrict on Belgrade', () => {
     expect(audit.connectorKinks.length).toBeLessThanOrEqual(15);
     const pads = new Set(city.pads.map((p) => p.node));
     for (const n of city.nodes) if (!n.boundary && n.radius > 0 && n.in.length + n.out.length >= 3 && n.in.some((s) => !city.segments[s]!.rail)) expect(pads.has(n.id), n.name).toBe(true);
+  });
+
+  it('lifts the bridge decks over the streets below them', () => {
+    const audit = auditRoads(city, real);
+    // Before: every deck lay on the street (headroom 0). Only the Brankova bridge stays low: the slip-road loop passes
+    // under it 2–10 m from its foot, where no ramp clears it on flat ground (0.1, 1.3 and 3.3 m).
+    expect(audit.lowDecks.length).toBeLessThanOrEqual(4);
+    for (const d of audit.lowDecks) expect(Math.hypot(d.x + 1060, d.z + 1398), `${d.x}, ${d.z}`).toBeLessThan(40);
+    // The Mostar tram stop stands on the tram viaduct.
+    const mostar = city.busStops.filter((s) => s.name === 'Mostar' && s.rail);
+    expect(mostar.length).toBeGreaterThan(0);
+    for (const s of mostar) expect(laneY(city, s.rail!.lane, s.rail!.s)).toBeGreaterThan(4);
+    const heights = city.lanes.flatMap((l) => l.y ?? []);
+    expect(Math.max(...heights)).toBeLessThanOrEqual(20);
+    for (const r of city.roads) if (r.layer > 0) expect(r.y?.length).toBe(r.points.length);
+    for (const p of city.pads) if ([...city.nodes[p.node]!.in, ...city.nodes[p.node]!.out].every((s) => city.segments[s]!.layer > 0)) expect(p.y).toBeGreaterThan(0);
+    // Levels meet only where a road changes level: no junction of streets on different levels.
+    const joints = city.nodes.filter((n) => new Set([...n.in, ...n.out].map((s) => city.segments[s]!.layer)).size > 1);
+    expect(joints.length).toBeLessThanOrEqual(21);
   });
 
   it('paints the OSM crossings as zebras that vehicles stop before', () => {

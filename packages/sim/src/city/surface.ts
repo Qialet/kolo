@@ -1,5 +1,6 @@
 import { add, cubicBezier, dist, dot, lineIntersection, norm, polyline, poseAlong, projectOnPolyline, quadBezier, rightOf, scale, sub, type Polyline, type Vec2 } from '../geometry.js';
 import { segmentDistance } from '../import/polygons.js';
+import { segmentY } from './decks.js';
 import { SegmentGrid } from './places.js';
 import type { City, CityNode, Crossing, JunctionPad, RoadStrip } from './types.js';
 
@@ -18,6 +19,8 @@ const CROSSING_MERGE = 4;
 
 /** One road between junctions, as the surface sees it: its centre line and paved width on each side. */
 export interface SurfaceRoad {
+  /** The segment whose centre line `base` is: its deck heights lift the strip. */
+  seg: number;
   /** Centre line from the `from` node to the `to` node. */
   base: Polyline;
   from: CityNode;
@@ -69,7 +72,9 @@ export function laySurface(city: City, roads: SurfaceRoad[], padded: (node: City
     const from = { ...r.from, radius: r0 };
     const to = { ...r.to, radius: r1 };
     const line = trimToJunctions(r.base, from, to);
-    strips.push({ points: line.points, left: r.left, right: r.right, layer: r.layer });
+    const strip: RoadStrip = { points: line.points, left: r.left, right: r.right, layer: r.layer };
+    if (city.segments[r.seg]!.y) strip.y = line.points.map((p) => Math.round(segmentY(city, r.seg, projectOnPolyline(r.base, p)) * 100) / 100);
+    strips.push(strip);
     spans.push([projectOnPolyline(r.base, line.points[0]!), projectOnPolyline(r.base, line.points[line.points.length - 1]!)]);
     const kerbL = polyline(offsetPoints(r.base.points, -r.left));
     const kerbR = polyline(offsetPoints(r.base.points, r.right));
@@ -90,7 +95,9 @@ export function laySurface(city: City, roads: SurfaceRoad[], padded: (node: City
   const pads: JunctionPad[] = [];
   for (const [id, list] of mouths) {
     if (list.length < 2 || list.every((m) => m.layer < 0)) continue;
-    pads.push({ node: id, outline: padOutline(city.nodes[id]!, list), layer: Math.max(...list.map((m) => m.layer)) });
+    const pad: JunctionPad = { node: id, outline: padOutline(city.nodes[id]!, list), layer: Math.max(...list.map((m) => m.layer)) };
+    if (city.nodes[id]!.y) pad.y = city.nodes[id]!.y;
+    pads.push(pad);
   }
   return { strips, pads, spans };
 }

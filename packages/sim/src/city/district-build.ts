@@ -27,6 +27,7 @@ import { layoutDepots } from './depots.js';
 import { addPlaces, parkCars } from './places.js';
 import { aroundIsland, findRings, pushOutOf, type Ring } from './rings.js';
 import { applySigns } from './signs.js';
+import { layDecks } from './decks.js';
 import { laySurface, offsetPoints, placeCrossings, pointAt, slice, trimToJunctions, type SurfaceRoad } from './surface.js';
 import { addTransit } from './transit-places.js';
 import type { City, CityNode, Connector, Lane, Segment, Street, Turn } from './types.js';
@@ -606,6 +607,7 @@ export function buildCityFromDistrict(district: District): City {
   for (const p of roads.paths ?? []) {
     city.paths.push({ kind: p.kind, width: p.w, points: Array.from({ length: p.pts.length / 2 }, (_, i) => ({ x: p.pts[2 * i]!, z: p.pts[2 * i + 1]! })) });
   }
+  layDecks(city, (id) => info[id]!.base);
   const surfaceRoads: SurfaceRoad[] = [];
   for (const e of edges.values()) {
     if (e.src.cls === 'tram') {
@@ -627,6 +629,7 @@ export function buildCityFromDistrict(district: District): City {
     const intoTo = at(seg, true);
     const intoFrom = back ? at(back, true) : at(seg, false);
     surfaceRoads.push({
+      seg: seg.id,
       base,
       from,
       to,

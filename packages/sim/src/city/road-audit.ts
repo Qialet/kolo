@@ -1,5 +1,6 @@
 import { dist, poseAlong, type Vec2 } from '../geometry.js';
 import { pointInPolygon, segmentDistance } from '../import/polygons.js';
+import { deckClearances } from './decks.js';
 import type { District } from './district.js';
 import { roadSurface } from './places.js';
 import type { City } from './types.js';
@@ -26,7 +27,8 @@ export type RoadCheck =
   | 'connectorsOffAsphalt'
   | 'stopsOnZebras'
   | 'railOffTrack'
-  | 'railDeadEnds';
+  | 'railDeadEnds'
+  | 'lowDecks';
 
 /** Bend of a road strip at one of its points, above which the mitred asphalt pinches or spikes. */
 const SHARP_BEND = 60;
@@ -66,6 +68,7 @@ export function auditRoads(city: City, district: District): RoadAudit {
     stopsOnZebras: [],
     railOffTrack: [],
     railDeadEnds: [],
+    lowDecks: [],
   };
 
   for (const r of city.roads) {
@@ -166,5 +169,8 @@ export function auditRoads(city: City, district: District): RoadAudit {
   }
 
   for (const list of Object.values(audit)) list.sort((a, b) => b.size - a.size);
+
+  // A deck too low over a lane of a lower level: its size is the headroom, so the lowest comes first.
+  for (const d of deckClearances(city)) audit.lowDecks.push(at(d, d.clearance, 'headroom'));
   return audit;
 }
