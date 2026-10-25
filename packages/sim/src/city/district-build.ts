@@ -187,6 +187,7 @@ export function buildCityFromDistrict(district: District): City {
     pads: [],
     crossings: [],
     tracks: [],
+    paths: [],
     areas: [],
     buildings: [],
     trees: [],
@@ -601,6 +602,9 @@ export function buildCityFromDistrict(district: District): City {
   buildTwins(city);
   for (const flat of roads.scenery ?? []) {
     city.tracks.push({ points: Array.from({ length: flat.length / 2 }, (_, i) => ({ x: flat[2 * i]!, z: flat[2 * i + 1]! })), layer: 0, scenery: true });
+  }
+  for (const p of roads.paths ?? []) {
+    city.paths.push({ kind: p.kind, width: p.w, points: Array.from({ length: p.pts.length / 2 }, (_, i) => ({ x: p.pts[2 * i]!, z: p.pts[2 * i + 1]! })) });
   }
   const surfaceRoads: SurfaceRoad[] = [];
   for (const e of edges.values()) {

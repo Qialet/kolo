@@ -1,6 +1,8 @@
 import type { DistrictRoads, RoadClass, RoadEdge, RoadNode, TurnRestriction } from '../city/district.js';
 import { pointInRect, type Rect, type Vec2 } from '../geometry.js';
 import { largestStronglyConnected } from '../graph.js';
+import { clipRuns, type RunPoint } from './clip.js';
+import { pathsOf } from './osm-paths.js';
 import { project, type BBoxDeg } from './project.js';
 import { toLatin } from './translit.js';
 
@@ -66,13 +68,19 @@ function trackInfo(id: number, nodes: number[], t: Tags): WayInfo | null {
   return { id, nodes, edge };
 }
 
+/** Road class of a street way (links count as their road), whether cars may use it or not. */
+function streetClass(t: Tags): RoadClass | null {
+  const cls = LINKS.has(t.highway ?? '') ? t.highway!.replace('_link', '') : t.highway;
+  return cls && CLASSES.has(cls) ? (cls as RoadClass) : null;
+}
+
 /** Road attributes of a drivable OSM way, or null when cars and buses cannot use it. */
 function wayInfo(id: number, nodes: number[], t: Tags): WayInfo | null {
   if (t.railway === 'tram') return trackInfo(id, nodes, t);
   if (!t.highway || t.area === 'yes') return null;
+  const cls = streetClass(t);
+  if (!cls) return null;
   const link = LINKS.has(t.highway);
-  const cls = (link ? t.highway.replace('_link', '') : t.highway) as RoadClass;
-  if (!CLASSES.has(cls)) return null;
   const restricted = ['no', 'private'].includes(t.motor_vehicle ?? t.motorcar ?? t.access ?? '');
   const psv = ['yes', 'designated'].includes(t.psv ?? t.bus ?? '');
   if (restricted && !psv) return null;
@@ -133,58 +141,6 @@ function speedKmh(v: string | undefined): number | undefined {
   if (v in ZONE_KMH) return ZONE_KMH[v];
   const n = Number.parseFloat(v);
   return Number.isFinite(n) && n > 0 ? n : undefined;
-}
-
-interface RunPoint extends Vec2 {
-  /** Graph node key when this point is a node of the graph (an OSM split node or a frame cut). */
-  key: string | null;
-}
-
-/**
- * Parts of a polyline inside the rectangle (Liang–Barsky per piece). Cut points get a boundary key;
- * original points keep the key supplied by `keyOf`.
- */
-function clipRuns(points: (Vec2 & { key: string | null })[], r: Rect): RunPoint[][] {
-  const runs: RunPoint[][] = [];
-  let run: RunPoint[] | null = null;
-  const cut = (p: Vec2): RunPoint => ({ x: p.x, z: p.z, key: `b${Math.round(p.x * 10)},${Math.round(p.z * 10)}` });
-  for (let i = 1; i < points.length; i++) {
-    const p = points[i - 1]!;
-    const q = points[i]!;
-    const dx = q.x - p.x;
-    const dz = q.z - p.z;
-    let t0 = 0;
-    let t1 = 1;
-    let empty = false;
-    for (const [den, num] of [
-      [-dx, p.x - r.x0],
-      [dx, r.x1 - p.x],
-      [-dz, p.z - r.z0],
-      [dz, r.z1 - p.z],
-    ] as const) {
-      if (den === 0) {
-        if (num < 0) empty = true;
-        continue;
-      }
-      const t = num / den;
-      if (den < 0) t0 = Math.max(t0, t);
-      else t1 = Math.min(t1, t);
-    }
-    if (empty || t0 > t1) {
-      run = null;
-      continue;
-    }
-    if (t0 > 0 || !run) {
-      run = [t0 > 0 ? cut({ x: p.x + dx * t0, z: p.z + dz * t0 }) : { ...p }];
-      runs.push(run);
-    }
-    if (t1 < 1) {
-      run.push(cut({ x: p.x + dx * t1, z: p.z + dz * t1 }));
-      run = null;
-    } else run.push({ ...q });
-  }
-  // Runs were pushed when opened; drop degenerate ones.
-  return runs.filter((r2) => r2.length > 1);
 }
 
 /** Builds the drivable road graph of a district from raw OSM elements. */
@@ -287,7 +243,9 @@ export function importRoads(elements: OsmElement[], bbox: BBoxDeg): DistrictRoad
   // Keep the largest strongly connected part for cars (the outside world is one extra node) and every tram track.
   const nodes = [...nodeByKey.values()];
   const keep = largestScc(nodes, edges);
-  edges = edges.filter((e) => e.cls === 'tram' || (keep.has(e.a) && keep.has(e.b)));
+  const inGraph = (e: RoadEdge) => e.cls === 'tram' || (keep.has(e.a) && keep.has(e.b));
+  const dropped = edges.filter((e) => !inGraph(e));
+  edges = edges.filter(inGraph);
   const used = new Set(edges.flatMap((e) => [e.a, e.b]));
   const kept = nodes.filter((n) => used.has(n.id));
   const newId = new Map(kept.map((n, i) => [n.id, i]));
@@ -304,6 +262,16 @@ export function importRoads(elements: OsmElement[], bbox: BBoxDeg): DistrictRoad
     restrictions: restrictionsOf(elements, kept, edges),
     crossings: crossingsOf(ways, edges, osmNodes, pos, bounds),
     scenery: sceneryTracks(elements, osmNodes, pos, bounds),
+    paths: pathsOf(
+      elements,
+      osmNodes,
+      pos,
+      bounds,
+      edges.filter((e) => e.cls !== 'tram'),
+      dropped,
+      new Set(ways.map((w) => w.id)),
+      streetClass,
+    ),
   };
 }
 

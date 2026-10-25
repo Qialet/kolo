@@ -245,6 +245,18 @@ describe('buildCityFromDistrict on Belgrade', () => {
     expect(city.tracks.filter((t) => t.scenery).length).toBeGreaterThanOrEqual(20);
   });
 
+  it('draws the paved ways no vehicle drives: streets left out, service roads, pedestrian streets and paths', () => {
+    const metres = (kind: string) => {
+      let s = 0;
+      for (const p of city.paths) if (p.kind === kind) for (let i = 1; i < p.points.length; i++) s += Math.hypot(p.points[i]!.x - p.points[i - 1]!.x, p.points[i]!.z - p.points[i - 1]!.z);
+      return s;
+    };
+    expect(metres('road')).toBeGreaterThan(1500);
+    expect(metres('service')).toBeGreaterThan(15_000);
+    expect(metres('pedestrian')).toBeGreaterThan(5000);
+    expect(metres('footway')).toBeGreaterThan(40_000);
+  });
+
   it('lays the tram tracks as rail segments joined only to each other', () => {
     expect(city.segments.filter((s) => s.rail).length).toBeGreaterThanOrEqual(40);
     expect(city.tracks.length).toBeGreaterThanOrEqual(40);

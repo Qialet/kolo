@@ -24,6 +24,9 @@ export const palette = {
   pitch: '#CFE1D2',
   water: '#C6D9EA',
   plaza: '#E8EBF0',
+  // Pedestrian streets and paths: warm paving, apart from the cool sidewalks and the asphalt.
+  paving: '#E8E0D2',
+  path: '#D6CCBA',
   parking: '#D8DDE5',
   shed: '#DDE2EA',
   // Courtyard playgrounds: warm sand and muted pastel equipment, quiet next to the accents.

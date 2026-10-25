@@ -1,5 +1,5 @@
 import type { Polyline, Rect, Vec2 } from '../geometry.js';
-import type { AreaKind, BuildingUse, DistrictTransit, PoiKind, TransitMode } from './district.js';
+import type { AreaKind, BuildingUse, DistrictTransit, PathKind, PoiKind, TransitMode } from './district.js';
 
 export type StreetClass = 'boulevard' | 'local';
 export type Turn = 'S' | 'L' | 'R';
@@ -144,6 +144,14 @@ export interface Track {
   points: Vec2[];
   layer: number;
   scenery?: true;
+}
+
+/** A paved way no vehicle drives in the model (service road, street left out of the graph, pedestrian street, path), drawn only. */
+export interface PathStrip {
+  kind: PathKind;
+  points: Vec2[];
+  /** Paved width, metres. */
+  width: number;
 }
 
 /** Asphalt of one road between junction pads: its centre line cut at the pads and the paved width on each side. */
@@ -309,6 +317,7 @@ export interface City {
   pads: JunctionPad[];
   crossings: Crossing[];
   tracks: Track[];
+  paths: PathStrip[];
   areas: Area[];
   buildings: Building[];
   trees: Tree[];

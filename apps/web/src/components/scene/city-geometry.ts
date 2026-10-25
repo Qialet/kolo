@@ -11,6 +11,7 @@ import {
   type BusStop,
   type City,
   type Lane,
+  type PathStrip,
   type Polyline,
   type Vec2,
 } from '@kolo/sim';
@@ -22,7 +23,7 @@ import { palette } from '@/lib/palette';
 const tmpColor = new THREE.Color();
 
 /** Ground levels: vehicles drive at y = 0, everything flat sits a little below or above. */
-export const LEVEL = { ground: -0.12, road: 0, ballast: 0.008, marking: 0.02, rail: 0.03, depotLot: 0.005, depotLines: 0.025, platform: 0.18 } as const;
+export const LEVEL = { ground: -0.12, road: 0, servicePath: -0.004, pedestrian: -0.068, footway: -0.072, ballast: 0.008, marking: 0.02, rail: 0.03, depotLot: 0.005, depotLines: 0.025, platform: 0.18 } as const;
 const AREA_LEVEL: Record<AreaKind, number> = {
   parking: -0.11,
   plaza: -0.105,
@@ -158,6 +159,34 @@ function ribbon(points: Vec2[], left: number, right: number, y: number, color: s
   return paint(upward(pos), color);
 }
 
+/** Turns sharper than this get a round join (the mitre of a ribbon is clamped). */
+const PATH_ROUND_COS = Math.cos((20 * Math.PI) / 180);
+const PATH_DISC_SIDES = 10;
+
+/** A paved way drawn only: a ribbon with round ends and round joins at sharp turns. */
+function addPath(parts: THREE.BufferGeometry[], p: PathStrip, y: number, color: string) {
+  const half = p.width / 2;
+  const strip = ribbon(p.points, half, half, y, color);
+  if (strip) parts.push(strip);
+  const pts = p.points;
+  const pos: number[] = [];
+  pts.forEach((q, i) => {
+    if (i > 0 && i < pts.length - 1) {
+      const a = pts[i - 1]!;
+      const b = pts[i + 1]!;
+      const d1 = Math.hypot(q.x - a.x, q.z - a.z);
+      const d2 = Math.hypot(b.x - q.x, b.z - q.z);
+      if (d1 * d2 > 0 && ((q.x - a.x) * (b.x - q.x) + (q.z - a.z) * (b.z - q.z)) / (d1 * d2) > PATH_ROUND_COS) return;
+    }
+    for (let k = 0; k < PATH_DISC_SIDES; k++) {
+      const t0 = (2 * Math.PI * k) / PATH_DISC_SIDES;
+      const t1 = (2 * Math.PI * (k + 1)) / PATH_DISC_SIDES;
+      pos.push(q.x, y, q.z, q.x + half * Math.cos(t1), y, q.z + half * Math.sin(t1), q.x + half * Math.cos(t0), y, q.z + half * Math.sin(t0));
+    }
+  });
+  if (pos.length) parts.push(paint(upward(pos), color));
+}
+
 const laneWidth = (city: City, lane: Lane) => city.streets[city.segments[lane.seg]!.street]!.laneWidth;
 const isRail = (city: City, lane: number) => !!city.segments[city.lanes[lane]!.seg]!.rail;
 /** Street segments among a node's legs (tram tracks left out). */
@@ -197,6 +226,11 @@ export function buildGroundGeometry(city: City) {
   const m = 300;
   const parts: THREE.BufferGeometry[] = [quad(b.x1 - b.x0 + 2 * m, b.z1 - b.z0 + 2 * m, (b.x0 + b.x1) / 2, LEVEL.ground, (b.z0 + b.z1) / 2, palette.sidewalk)];
   for (const a of city.areas) parts.push(flatPolygon(a.outer, a.holes, AREA_LEVEL[a.kind], AREA_COLOR[a.kind]));
+  // Paving over the land cover, under the asphalt where it meets the streets.
+  for (const p of city.paths) {
+    if (p.kind === 'pedestrian') addPath(parts, p, LEVEL.pedestrian, palette.paving);
+    else if (p.kind === 'footway') addPath(parts, p, LEVEL.footway, palette.path);
+  }
   return merge(parts);
 }
 
@@ -243,6 +277,8 @@ export function buildRoadGeometry(city: City) {
   for (const pad of city.pads) if (pad.layer >= 0) parts.push(padGeometry(pad.outline, pad.island, city.nodes[pad.node]!, LEVEL.road + 0.001, palette.asphalt));
   // Bus bays cut into the sidewalk, just under the street's own asphalt where they meet.
   for (const { stop, lane, kerb } of curbStops(city)) if (stop.bay) parts.push(flatPolygon(bayOutline(stop, lane, kerb), [], LEVEL.road - 0.002, palette.asphalt));
+  // Service roads and streets no car takes, under the streets' asphalt where they join.
+  for (const p of city.paths) if (p.kind === 'service' || p.kind === 'road') addPath(parts, p, LEVEL.servicePath, palette.asphalt);
   return merge(parts);
 }
 

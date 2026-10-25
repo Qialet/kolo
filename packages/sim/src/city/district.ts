@@ -170,6 +170,19 @@ export interface DistrictRoads {
   crossings?: number[];
   /** Tracks no tram runs on in the model (yards, sidings, two-way track, the railway), drawn only: x, z pairs per track. */
   scenery?: number[][];
+  /** Paved ways no vehicle drives in the model (service roads, streets left out of the graph, pedestrian streets, paths), drawn only. */
+  paths?: DistrictPath[];
+}
+
+/** road: a street left out of the graph; service: driveways, yards and parking aisles; pedestrian: pedestrian streets; footway: paths, steps and cycleways off the streets. */
+export type PathKind = 'road' | 'service' | 'pedestrian' | 'footway';
+
+export interface DistrictPath {
+  kind: PathKind;
+  /** Paved width, metres. */
+  w: number;
+  /** Centre line: x, z pairs. */
+  pts: number[];
 }
 
 export interface RoadNode {

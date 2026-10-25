@@ -62,6 +62,60 @@ describe('importRoads', () => {
     expect(roads.scenery![0]).toHaveLength(6);
   });
 
+  it('keeps service roads, pedestrian streets and paths as paths with their widths', () => {
+    const o = osm();
+    o.way([o.node(-50, 0), o.node(50, 0)], { highway: 'secondary' });
+    o.way([o.node(-50, 20), o.node(50, 20)], { highway: 'service', service: 'parking_aisle' });
+    o.way([o.node(-50, 30), o.node(50, 30)], { highway: 'service' });
+    o.way([o.node(-50, 40), o.node(50, 40)], { highway: 'pedestrian', width: '9' });
+    o.way([o.node(-50, 60), o.node(0, 70), o.node(50, 60)], { highway: 'footway' });
+    o.way([o.node(-50, 80), o.node(50, 80)], { highway: 'steps' });
+    // Not drawn: a sidewalk, a crossing, a passage under a building, a tunnel, a square and a road under construction.
+    o.way([o.node(-50, 90), o.node(50, 90)], { highway: 'footway', footway: 'sidewalk' });
+    o.way([o.node(0, -40), o.node(0, -20)], { highway: 'footway', footway: 'crossing' });
+    o.way([o.node(-50, 100), o.node(50, 100)], { highway: 'service', covered: 'yes' });
+    o.way([o.node(-50, 110), o.node(50, 110)], { highway: 'footway', tunnel: 'yes', layer: '-1' });
+    const sq = [o.node(-50, 120), o.node(50, 120), o.node(50, 130)];
+    o.way([...sq, sq[0]!], { highway: 'pedestrian', area: 'yes' });
+    o.way([o.node(-50, 140), o.node(50, 140)], { highway: 'construction' });
+    const { paths } = importRoads(o.els, box);
+    expect(paths!.map((p) => [p.kind, p.w])).toEqual([
+      ['service', 5],
+      ['service', 4],
+      ['pedestrian', 9],
+      ['footway', 2],
+      ['footway', 2],
+    ]);
+    expect(paths![3]!.pts).toHaveLength(6);
+  });
+
+  it('draws the streets the graph leaves out as road paths', () => {
+    const o = osm();
+    const a = o.node(-50, 0);
+    const b = o.node(50, 0);
+    o.way([o.node(-400, 0), a, b, o.node(400, 0)], { highway: 'secondary' });
+    o.way([b, o.node(50, 50)], { highway: 'residential', oneway: 'yes' });
+    o.way([a, o.node(-50, 50)], { highway: 'tertiary', motor_vehicle: 'no', lanes: '2' });
+    const { paths } = importRoads(o.els, box);
+    expect(paths!.map((p) => [p.kind, p.w])).toEqual([
+      ['road', 3],
+      ['road', 6.4],
+    ]);
+  });
+
+  it('cuts untagged sidewalks along the streets out of the paths', () => {
+    const o = osm();
+    o.way([o.node(-100, 0), o.node(100, 0)], { highway: 'secondary', lanes: '2' });
+    // 3 m beyond the kerb along the street for 60 m, then off into a park.
+    o.way([o.node(-30, 6.2), o.node(30, 6.2), o.node(30, 60)], { highway: 'footway' });
+    const { paths } = importRoads(o.els, box);
+    expect(paths).toHaveLength(1);
+    const pts = paths![0]!.pts;
+    expect(pts[0]).toBeCloseTo(30, 0);
+    expect(pts[1]).toBeLessThan(15);
+    expect(pts[pts.length - 1]).toBeCloseTo(60, 0);
+  });
+
   it('keeps the marked pedestrian crossings of the streets', () => {
     const o = osm();
     const marked = o.node(-20, 0, { highway: 'crossing', crossing: 'uncontrolled' });
