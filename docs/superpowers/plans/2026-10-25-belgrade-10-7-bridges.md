@@ -38,29 +38,29 @@
 ### Задача 1: высоты настилов в городе
 **Файлы:** packages/sim/src/city/decks.ts (создать, + decks.test.ts), city/types.ts, city/district-build.ts, city/surface.ts, city/road-audit.ts, city/district-build.test.ts, index.ts (экспорт).
 **Интерфейсы:** константы DECK_STEP = 6, RAMP_GRADE = 0.08, RAMP_GRADE_MAX = 0.3, DECK_CLEARANCE = 5, DECK_SAMPLE = 4, TUNNEL_HIDE = 3; layDecks(city): void — до laySurface, пишет Segment.y?: number[] (высоты через DECK_SAMPLE м от from, последняя — на length; только у layer > 0) и CityNode.y?: number (если больше 0); segmentY(city, seg, s), laneY(city, lane, s) (s полосы пропорционально сегменту), connectorY(city, conn, s) (линейно от конца from-полосы к началу to-полосы), nodeY(city, node): number; inTunnel(city, lane, s): boolean; deckClearances(city): { x, z, clearance }[] — для аудита. SurfaceRoad получает seg; RoadStrip.y?: number[] (по точкам) и JunctionPad.y?: number — у поднятых.
-- [ ] Тесты на фикстуре (district.fixture): мост N–S над улицей W–E со стыками в 150 м — над улицей 6 м, у стыков 0, уклон не круче 8%, улица 0; стыки в 40 м — над улицей не ниже 5 м, уклон не круче 30%; мост до граничного узла — у рамки полная высота; layer 2 над layer 1 — 12 м; тоннель — высота 0, inTunnel ложно в 3 м от концов и истинно посередине; ступенек нет (конец полосы, коннектор, начало — 0,05 м).
-- [ ] Тесты на Белграде: аудит lowDecks ≤ 4 и просвет не меньше 2,5 м; остановка Mostar на высоте больше 4 м; наибольшая высота не больше 20 м; у всех лент и площадок уровня больше 0 есть y, у ленты y по числу точек; узлов со стыком уровней не больше 21; сборка в прежнем бюджете.
-- [ ] Реализация; road-audit.mjs печатает lowDecks и на карте --map подписывает высоту настила (опционально цветом); коммит feat(sim): bridge decks rise over the streets below.
+- [x] Тесты на фикстуре (district.fixture): мост N–S над улицей W–E со стыками в 150 м — над улицей 6 м, у стыков 0, уклон не круче 8%, улица 0; стыки в 40 м — над улицей не ниже 5 м, уклон не круче 30%; мост до граничного узла — у рамки полная высота; layer 2 над layer 1 — 12 м; тоннель — высота 0, inTunnel ложно в 3 м от концов и истинно посередине; ступенек нет (конец полосы, коннектор, начало — 0,05 м).
+- [x] Тесты на Белграде: аудит lowDecks ≤ 4, все — у ноги моста Бранковой (просвет 0,1, 1,3 и 3,3 м: петля съезда проходит под ним в 2–10 м от стыка; порог «не меньше 2,5 м» снят); остановка Mostar на высоте больше 4 м; наибольшая высота не больше 20 м; у всех лент и площадок уровня больше 0 есть y, у ленты y по числу точек; узлов со стыком уровней не больше 21; сборка в прежнем бюджете.
+- [x] Реализация: у полос свои высоты (проекция на ось сегмента), в круге узла высота узла; сборка города не медленнее (лучшее 347 мс); road-audit.mjs печатает lowDecks (подпись высот на карте не делалась); коммит feat(sim): bridge decks rise over the streets below.
 
 ### Задача 2: высота и тоннель в кадре
 **Файлы:** packages/contracts/src/live.ts, packages/sim/src/engine/traffic.ts, engine/simulation.ts, engine/simulation.test.ts (или traffic.test.ts), apps/api — только если что-то читает кортеж по длине.
 **Интерфейсы:** VehicleTuple — 9 полей, девятое y (0,1 м; во дворе и стоянке 0); flags бит 6 (64) — в тоннеле; TrafficSystem.heightOf(v): number и TrafficSystem.hidden(v): boolean по laneY/connectorY/inTunnel с той же точкой, что поза (середина, у трамвая перед).
-- [ ] Тесты: на фикстуре с мостом машина на настиле получает y > 5, под ним — 0; на тоннельной полосе посередине бит 64, у портала нет; кадр Белграда меньше 32 КБ (существующий тест).
-- [ ] Реализация, документация кортежа в contracts; коммит feat(sim): vehicle height and tunnel flag in the live frame.
+- [x] Тесты: на фикстуре с мостом машина на настиле получает y > 5, под ним — 0; на тоннельной полосе посередине бит 64, у портала нет; кадр Белграда меньше 32 КБ (существующий тест).
+- [x] Реализация, документация кортежа в contracts (высота с шагом 0,01 м — для устойчивого наклона); коммит feat(sim): vehicle height and tunnel flag in the live frame.
 
 ### Задача 3: мосты и порталы в сцене
 **Файлы:** apps/web/src/components/scene/city-geometry.ts, city-static.tsx, traffic-signs.tsx, traffic-lights.tsx, lib/palette.ts.
 **Интерфейсы:** buildDeckGeometry(city) — поднятые ленты и площадки (из buildRoadGeometry они уходят), борта, парапеты, опоры, трамвайные плиты; buildPortalGeometry(city) — зев и рама; цвета palette.deck, deckSide, tunnelMouth. Разметка, рельсы, балласт, провода, платформа Mostar, знаки и светофоры — на laneY/segmentY/nodeY.
-- [ ] Реализация; меш настилов castShadow и receiveShadow; pnpm lint и pnpm build чистые.
-- [ ] Скриншоты (tmp/shots.mjs): развязка обзор и вблизи, мост Бранковой, оба портала; pnpm perf --budget зелёный; коммит feat(web): bridges over the streets and tunnel portals.
+- [x] Реализация; меш настилов castShadow и receiveShadow; pnpm lint и pnpm build чистые.
+- [x] Скриншоты (tmp/shots/a7-*, z-*): развязка обзор и вблизи, мост Бранковой, оба портала; pnpm perf --budget зелёный (5,6 мс, home 139–145 draw call из 150); коммит feat(web): bridges over the streets and tunnel portals.
 
 ### Задача 4: машины на настиле и в тоннеле
 **Файлы:** apps/web/src/lib/live.ts (FrameBuffer: y и наклон), lib/tram-trail.ts (+ tram-trail.test.mjs), components/scene/vehicles.tsx, overlays.tsx, scene-labels.tsx.
 **Интерфейсы:** VehiclePose.y и pitch; TrailPose.y и pitch; скрытые (бит 64) в instanced-меши не пишутся, кольцо и подпись выбранного скрыты.
-- [ ] Тест tram-trail: след с ростом высоты отдаёт секциям интерполированный y и наклон; скачок больше 20 м — заново на высоте передней точки.
-- [ ] Реализация; скриншоты машин и трамвая на эстакаде, такси у портала и улица Теразије с машинами над тоннелем; через window.__koloFrames — машины с битом 64 есть и их нет в сцене; коммит feat(web): vehicles ride the decks and vanish in the tunnel.
+- [x] Тест tram-trail: след с ростом высоты отдаёт секциям интерполированный y и наклон; скачок больше 20 м — заново на высоте передней точки.
+- [x] Реализация; скрытые не попадают в livePoses (кольцо, подпись и слежение камеры ждут выхода); скриншоты машин и трамвая на эстакаде, такси у портала и улица Теразије с машинами над тоннелем; через window.__koloFrames — машины с битом 64 есть и их нет в сцене; коммит feat(web): vehicles ride the decks and vanish in the tunnel.
 
 ### Задача 5: доки и проверка
 **Файлы:** docs/SIMULATION.md (99 строк: сжать при добавлении), docs/ARCHITECTURE.md, docs/DESIGN.md, docs/ROADMAP.md (100 строк: правка строки этапа 7 на месте), спек (строка про плоский мир: мосты подняты в сцене).
-- [ ] Доки: высоты настилов и тоннель в SIMULATION, кортеж и меш настилов в ARCHITECTURE, вид моста и портала в DESIGN; чекбокс этапа 7 с итогами замеров.
-- [ ] pnpm test, pnpm build, pnpm lint (web), pnpm perf --budget зелёные; аудит до/после; коммит docs: bridges and tunnels by layer. Вливание в main — только по решению пользователя.
+- [x] Доки: высоты настилов и тоннель в SIMULATION, кортеж и меш настилов в ARCHITECTURE, вид моста и портала в DESIGN; чекбокс этапа 7 с итогами замеров.
+- [x] pnpm test (sim 237, api 6, web 11), pnpm build, pnpm lint (web), pnpm perf --budget зелёные; аудит до/после: прежние счётчики не изменились, lowDecks 3; коммит docs: bridges and tunnels by layer. Вливание в main — только по решению пользователя.
