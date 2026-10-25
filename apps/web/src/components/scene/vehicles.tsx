@@ -29,6 +29,10 @@ const TRAM_JOINT = 0.35;
 const trails = new TramTrails();
 const sectionPoses: TrailPose[] = [];
 const HALO_PULSE = 2.4;
+/** Turn signals: frame bits 4 (left) and 5 (right), blinking at this rate (Hz). */
+const SIGNAL_LEFT = 16;
+const SIGNAL_RIGHT = 32;
+const BLINK_HZ = 1.5;
 const KIND = Object.fromEntries(VEHICLE_KINDS.map((k, i) => [k, i])) as Record<(typeof VEHICLE_KINDS)[number], number>;
 
 const tmp = new THREE.Object3D();
@@ -85,13 +89,18 @@ function useGeometries() {
     const carWheels = wheels(0.84, [-1.35, 1.35], 0.33);
     const tails = mergeGeometries([box(0.42, 0.16, 0.06, -0.58, 0.8, -2.2, 0.03), box(0.42, 0.16, 0.06, 0.58, 0.8, -2.2, 0.03)])!;
     const sign = box(0.78, 0.24, 0.34, 0, 1.62, -0.2, 0.06);
+    // Turn signal lamps wrapped round the left corners, larger than life to read from the isometric camera
+    // (model +x is the left side; the right side is the same mirrored).
+    const blink = (w: number, h: number, x: number, y: number, z: number) => mergeGeometries([box(w, h, w, x, y, z, 0.04), box(w, h, w, x, y, -z, 0.04)])!;
+    const carBlink = blink(0.34, 0.22, 0.8, 0.8, 2.1);
     const halo = new THREE.RingGeometry(3.4, 4.3, 40);
-    const coach = (length: number, height: number, axles: number[], wheel: number): Record<(typeof COACH_PARTS)[number], THREE.BufferGeometry> => ({
+    const coach = (length: number, height: number, axles: number[], wheel: number): Record<(typeof COACH_PARTS)[number] | 'Blink', THREE.BufferGeometry> => ({
       Body: box(2.5, height, length - 0.2, 0, 0.35 + height / 2, 0, 0.3),
       Glass: box(2.56, 0.95, length - 0.8, 0, 0.35 + height - 0.8, 0.1, 0.12),
       Roof: box(2.2, 0.16, length * 0.8, 0, 0.35 + height + 0.09, 0, 0.06),
       Wheels: wheels(1.08, axles, wheel),
       Tails: mergeGeometries([box(0.4, 0.3, 0.06, -0.9, 0.9, -length / 2 + 0.08, 0.03), box(0.4, 0.3, 0.06, 0.9, 0.9, -length / 2 + 0.08, 0.03)])!,
+      Blink: blink(0.42, 0.3, 1.1, 0.9, length / 2 - 0.16),
     });
     const transit: Record<TransitGroup, Record<string, THREE.BufferGeometry>> = {
       bus: coach(12, 2.5, [-3.9, 3.9], 0.5),
@@ -106,6 +115,7 @@ function useGeometries() {
       Roof: plainBox(2.2, 0.16, length * 0.8, 0, 0.35 + height + 0.09, 0),
       Wheels: null,
       Tails: null,
+      Blink: null,
     });
     const farBody = plainBox(1.82, 0.66, 4.4, 0, 0.66, 0);
     const farCabin = plainBox(1.52, 0.5, 2.1, 0, 1.18, -0.25);
@@ -114,16 +124,18 @@ function useGeometries() {
       taxiCabin: farCabin,
       taxiWheels: null,
       taxiTails: null,
+      taxiBlink: null,
       taxiSign: plainBox(0.78, 0.24, 0.34, 0, 1.62, -0.2),
       carBody: farBody,
       carCabin: farCabin,
       carWheels: null,
       carTails: null,
+      carBlink: null,
       tramPanto: null,
     };
     const farCoaches = { bus: flat(12, 2.5), trolley: flat(12, 2.5), minibus: flat(7.5, 2.3), tram: flat(TRAM_MODEL, 2.45) };
     for (const [group, parts] of Object.entries(farCoaches)) for (const [p, geo] of Object.entries(parts)) far[`${group}${p}` as Part] = geo;
-    return { carBody, carCabin, carWheels, tails, sign, halo, transit, tram, far };
+    return { carBody, carCabin, carWheels, tails, sign, carBlink, halo, transit, tram, far };
   }, []);
 }
 
@@ -168,13 +180,17 @@ type Group = 'taxi' | 'car' | TransitGroup | 'tram';
 const TRAM_SECTION_PARTS = ['tramBody', 'tramGlass', 'tramRoof', 'tramWheels'] as const;
 const TRANSIT: readonly TransitGroup[] = ['bus', 'trolley', 'minibus'];
 const COACH_PARTS = ['Body', 'Glass', 'Roof', 'Wheels', 'Tails'] as const;
+/** Groups with turn signals (not trams); their lamps are instanced apart from the bodies, only while lit. */
+const SIGNALLING = ['taxi', 'car', 'bus', 'trolley', 'minibus'] as const;
+type BlinkPart = `${(typeof SIGNALLING)[number]}Blink`;
 type TransitPart = `${TransitGroup}${(typeof COACH_PARTS)[number] | 'Poles'}`;
 const partsOf = (group: TransitGroup): TransitPart[] => [...COACH_PARTS, ...(group === 'trolley' ? (['Poles'] as const) : [])].map((p) => `${group}${p}` as const);
 type Part =
   | 'taxiBody' | 'taxiCabin' | 'taxiWheels' | 'taxiTails' | 'taxiSign' | 'taxiHalo'
   | 'carBody' | 'carCabin' | 'carWheels' | 'carTails'
   | (typeof TRAM_SECTION_PARTS)[number] | 'tramTails' | 'tramPanto'
-  | TransitPart;
+  | TransitPart
+  | BlinkPart;
 const TRANSIT_COLOR: Record<TransitGroup, string> = { bus: palette.bus, trolley: palette.trolley, minibus: palette.minibus };
 
 /** The single <Vehicles> instance registers its instanced meshes here; only useFrame reads them. */
@@ -224,6 +240,8 @@ export function Vehicles() {
     const pulse = (1 + Math.sin(clock.elapsedTime * HALO_PULSE) * 0.08) * Math.max(1, 7 / camera.zoom);
     const n = frameBuffer.sample(performance.now(), poses.current);
     const counts = { taxi: 0, car: 0, bus: 0, trolley: 0, minibus: 0, tram: 0 };
+    const blinks = { taxi: 0, car: 0, bus: 0, trolley: 0, minibus: 0 };
+    const lit = (clock.elapsedTime * BLINK_HZ) % 1 < 0.5;
     let trams = 0;
     const idLists = ids.current;
     livePoses.clear();
@@ -270,6 +288,21 @@ export function Vehicles() {
       tmp.scale.setScalar(Math.max(0.01, grow) * 1.15);
       tmp.updateMatrix();
       const braking = (p.flags & 1) !== 0;
+      const signal = lit ? p.flags & (SIGNAL_LEFT | SIGNAL_RIGHT) : 0;
+      const signalling = group as (typeof SIGNALLING)[number];
+      const lamps = meshes[`${signalling}Blink`];
+      if (signal && lamps) {
+        // The right side is the left one mirrored.
+        if (signal & SIGNAL_RIGHT) {
+          tmp.scale.x = -tmp.scale.x;
+          tmp.updateMatrix();
+        }
+        lamps.setMatrixAt(blinks[signalling]++, tmp.matrix);
+        if (signal & SIGNAL_RIGHT) {
+          tmp.scale.x = -tmp.scale.x;
+          tmp.updateMatrix();
+        }
+      }
       if (group === 'taxi') {
         for (const part of ['taxiBody', 'taxiCabin', 'taxiWheels', 'taxiTails', 'taxiSign'] as const) meshes[part]?.setMatrixAt(k, tmp.matrix);
         meshes.taxiTails?.setColorAt(k, braking ? TAIL_ON : TAIL_OFF);
@@ -310,6 +343,13 @@ export function Vehicles() {
     apply('tram', TRAM_SECTION_PARTS);
     counts.tram = trams;
     apply('tram', ['tramPanto', 'tramTails'] as const);
+    for (const group of SIGNALLING) {
+      const m = meshes[`${group}Blink`];
+      if (!m) continue;
+      m.count = blinks[group];
+      m.boundingSphere = WORLD_SPHERE;
+      m.instanceMatrix.needsUpdate = true;
+    }
     trails.prune();
     const halo = meshes.taxiHalo;
     if (halo) {
@@ -372,6 +412,9 @@ export function Vehicles() {
       <instancedMesh ref={bind('taxiTails')} args={[g.tails, undefined, MAX.taxi]} frustumCulled={false} instanceColor={c.taxiTails}>
         <meshBasicMaterial toneMapped={false} />
       </instancedMesh>
+      <instancedMesh ref={bind('taxiBlink')} args={[g.carBlink, undefined, MAX.taxi]} frustumCulled={false}>
+        <meshBasicMaterial color={palette.blinker} toneMapped={false} side={THREE.DoubleSide} />
+      </instancedMesh>
       <instancedMesh ref={bind('taxiSign')} args={[g.sign, undefined, MAX.taxi]} frustumCulled={false} instanceColor={c.taxiSign}>
         <meshBasicMaterial toneMapped={false} />
       </instancedMesh>
@@ -388,6 +431,9 @@ export function Vehicles() {
       </instancedMesh>
       <instancedMesh ref={bind('carTails')} args={[g.tails, undefined, MAX.car]} frustumCulled={false} instanceColor={c.carTails}>
         <meshBasicMaterial toneMapped={false} />
+      </instancedMesh>
+      <instancedMesh ref={bind('carBlink')} args={[g.carBlink, undefined, MAX.car]} frustumCulled={false}>
+        <meshBasicMaterial color={palette.blinker} toneMapped={false} side={THREE.DoubleSide} />
       </instancedMesh>
 
       {/* Public transport: buses cobalt (the second accent of the city), trolleybuses teal, minibuses light cobalt. */}
@@ -407,6 +453,9 @@ export function Vehicles() {
           </instancedMesh>
           <instancedMesh ref={bind(`${group}Tails`)} args={[g.transit[group].Tails, undefined, MAX[group]]} frustumCulled={false} instanceColor={c[`${group}Tails`]}>
             <meshBasicMaterial toneMapped={false} />
+          </instancedMesh>
+          <instancedMesh ref={bind(`${group}Blink`)} args={[g.transit[group].Blink, undefined, MAX[group]]} frustumCulled={false}>
+            <meshBasicMaterial color={palette.blinker} toneMapped={false} side={THREE.DoubleSide} />
           </instancedMesh>
           {g.transit[group].Poles && (
             <instancedMesh ref={bind(`${group}Poles`)} args={[g.transit[group].Poles, undefined, MAX[group]]} frustumCulled={false}>

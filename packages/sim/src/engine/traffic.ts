@@ -90,6 +90,9 @@ const STOP_REACH = 4;
 const QUEUE_BEHIND = 20;
 /** While further than this from its new lane, a vehicle changing lanes still blocks its old one. */
 const CHANGE_STRADDLE = 0.8;
+/** Turn signals go on this far before a turn at a junction, and before the vehicle's own stop at the kerb. */
+const SIGNAL_AHEAD = 35;
+const SIGNAL_STOP = 30;
 
 export function makeDriver(rng: Rng, kind: VehicleKind): DriverProfile {
   if (kind === 'TRAM') return { v0Factor: rng.range(0.9, 0.95), aMax: 1.0, bComf: 1.5, headway: 2.0, minGap: 3, politeness: 0.5 };
@@ -883,6 +886,27 @@ export class TrafficSystem {
     let n = 0;
     for (const laneId of this.city.segments[segId]!.lanes) n += this.occ[laneId]!.length;
     return n;
+  }
+
+  /**
+   * Turn signal now: towards the new lane during a lane change, to the kerb before the vehicle's stop, out of it
+   * when leaving, and before and through a left or right turn at a junction. Trams have none.
+   */
+  turnSignal(v: Vehicle): 'L' | 'R' | null {
+    const { city } = this;
+    if (v.kind === 'TRAM') return null;
+    if (v.mode === 'conn') {
+      const turn = city.connectors[v.conn]!.turn;
+      return turn === 'S' ? null : turn;
+    }
+    if (v.mode === 'pulled') return v.wantsDepart && v.pullOffset > 0 ? 'L' : null;
+    if (v.mode !== 'lane') return null;
+    if (v.changeFrom >= 0) return city.lanes[v.lane]!.index < city.lanes[v.changeFrom]!.index ? 'L' : 'R';
+    if (v.stop && v.stop.lane === v.lane && v.pullOffset > 0 && v.stop.s - v.s < SIGNAL_STOP) return 'R';
+    const next = v.path[v.pathIdx + 1];
+    if (!next || city.lanes[v.lane]!.length - v.s > SIGNAL_AHEAD) return null;
+    const turn = city.connectors[next.conn]!.turn;
+    return turn === 'S' ? null : turn;
   }
 
   turnAhead(v: Vehicle) {

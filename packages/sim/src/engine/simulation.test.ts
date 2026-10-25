@@ -138,16 +138,28 @@ describe('Simulation', () => {
     const sim = new Simulation(buildCity(), fleet(60), { startAt: Date.UTC(2026, 9, 22, 6, 0) });
     const steps: number[] = [];
     let frameBytes = 0;
+    let blinking = 0;
+    let both = 0;
     for (let i = 0; i < 120 * 20; i++) {
       // Wall time: process.cpuUsage ticks in 15.6 ms quanta on Windows; the budget leaves room for busy cores.
       const t0 = performance.now();
       sim.tick(0.05);
       steps.push(performance.now() - t0);
-      if (i % 20 === 0) frameBytes = Math.max(frameBytes, JSON.stringify(sim.frame()).length);
+      if (i % 20 === 0) {
+        const frame = sim.frame();
+        frameBytes = Math.max(frameBytes, JSON.stringify(frame).length);
+        // Turn signals: bit 4 left, bit 5 right, never both.
+        for (const t of frame.vehicles) {
+          if (t[7] & 48) blinking++;
+          if ((t[7] & 48) === 48) both++;
+        }
+      }
     }
     steps.sort((a, b) => a - b);
     expect(steps[Math.floor(steps.length * 0.99)]).toBeLessThan(16);
     expect(frameBytes).toBeLessThan(32 * 1024);
+    expect(blinking).toBeGreaterThan(100);
+    expect(both).toBe(0);
   });
 });
 

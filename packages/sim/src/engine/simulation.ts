@@ -143,6 +143,9 @@ const BASE_ORDERS_PER_MIN = 3.2;
 const FARE = { start: 230, perKm: 95, perMin: 18 };
 const SUBSTEP = 0.05;
 
+/** Frame flags of a turn signal: bit 4 left, bit 5 right. */
+const TURN_SIGNAL_BITS = { L: 16, R: 32, none: 0 } as const;
+
 export class Simulation {
   readonly traffic: TrafficSystem;
   readonly taxis = new Map<string, Taxi>();
@@ -869,7 +872,7 @@ export class Simulation {
     for (const v of this.traffic.vehicles) {
       const taxi = v.kind === 'TAXI' ? this.taxis.get(v.id) : undefined;
       const flags =
-        (v.acc < -1.2 ? 1 : 0) | (v.mode === 'pulled' ? 2 : 0) | (taxi?.activity === 'ON_TRIP' ? 4 : 0) | (v.kind === 'TRAM' && v.length === fixedLength('TRAM', true) ? 8 : 0);
+        (v.acc < -1.2 ? 1 : 0) | (v.mode === 'pulled' ? 2 : 0) | (taxi?.activity === 'ON_TRIP' ? 4 : 0) | (v.kind === 'TRAM' && v.length === fixedLength('TRAM', true) ? 8 : 0) | TURN_SIGNAL_BITS[this.traffic.turnSignal(v) ?? 'none'];
       vehicles.push([
         v.id,
         VEHICLE_KINDS.indexOf(v.kind),

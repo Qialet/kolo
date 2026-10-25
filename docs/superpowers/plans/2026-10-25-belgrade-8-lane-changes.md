@@ -50,9 +50,9 @@
 
 ### Задача 3: поворотники в кадре и сцене
 **Файлы:** packages/contracts/src/live.ts (описание flags), packages/sim/src/engine/simulation.ts (биты 4 и 5), apps/web/src/components/scene/vehicles.tsx, lib/palette.ts.
-- [ ] Тест sim: машина в манёвре и перед левым поворотом получает нужный бит, без манёвра и далеко от перекрёстка — нет.
-- [ ] Клиент: инстансы огней поворотника по группам машин; pnpm lint и pnpm build чистые; скриншоты playwright-core: обгон на бульваре (Kralja Milana или Bulevar kralja Aleksandra) с горящим поворотником.
-- [ ] pnpm perf --budget в бюджете; коммит feat(web): turn signals.
+- [x] Тест sim: машина в манёвре и перед левым поворотом получает нужный бит, без манёвра и далеко от перекрёстка — нет.
+- [x] Клиент: инстансы огней поворотника по группам машин; pnpm lint и pnpm build чистые; скриншоты playwright-core: обгон на бульваре (Kralja Milana или Bulevar kralja Aleksandra) с горящим поворотником.
+- [x] pnpm perf --budget в бюджете; коммит feat(web): turn signals.
 
 ### Задача 4: доки, проверка, слияние
 **Файлы:** docs/SIMULATION.md, docs/DESIGN.md, docs/ARCHITECTURE.md (биты flags, если описаны), docs/ROADMAP.md.

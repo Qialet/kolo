@@ -145,6 +145,36 @@ function drive(traffic: TrafficSystem, seconds: number, v: Vehicle | null, each?
   return starts;
 }
 
+describe('turn signals', () => {
+  it('blink towards the new lane during a lane change', () => {
+    const city = boulevard();
+    const traffic = new TrafficSystem(city);
+    const [inner, curb] = segOf(city, W, O).lanes;
+    const toInner = car(traffic, city, 'in', 1, 20, E, 8);
+    expect(traffic.turnSignal(toInner)).toBeNull();
+    expect(traffic.changeLane(toInner, inner!)).toBe(true);
+    expect(traffic.turnSignal(toInner)).toBe('L');
+    const toCurb = car(traffic, city, 'out', 0, 50, E, 8);
+    expect(traffic.changeLane(toCurb, curb!)).toBe(true);
+    expect(traffic.turnSignal(toCurb)).toBe('R');
+  });
+
+  it('blink before and through a turn at the junction, not on the way straight on', () => {
+    const city = boulevard();
+    const traffic = new TrafficSystem(city);
+    const len = city.lanes[segOf(city, W, O).lanes[0]!]!.length;
+    const near = car(traffic, city, 'near', 0, len - 30, N, 8);
+    const far = car(traffic, city, 'far', 0, len - 60, N, 8);
+    const straight = car(traffic, city, 'straight', 1, len - 20, E, 8);
+    expect(traffic.turnSignal(near)).toBe('L');
+    expect(traffic.turnSignal(far)).toBeNull();
+    expect(traffic.turnSignal(straight)).toBeNull();
+    for (let t = 0; t < 10 && near.mode !== 'conn'; t += 0.05) traffic.step(0.05);
+    expect(near.mode).toBe('conn');
+    expect(traffic.turnSignal(near)).toBe('L');
+  });
+});
+
 describe('MOBIL lane changes', () => {
   it('overtakes a slow bus and does not swing back before the cool-down', () => {
     const city = longBoulevard();

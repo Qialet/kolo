@@ -58,6 +58,8 @@ export const palette = {
   // Signals (emissive)
   red: '#FF3B47',
   amber: '#FFB020',
+  /** Turn signals of moving vehicles: oranger than the taxi pick-up amber. */
+  blinker: '#FF8A1C',
   green: '#22D47A',
   lampOff: '#3A3F4A',
   pole: '#5B6372',
