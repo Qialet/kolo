@@ -32,6 +32,8 @@ export interface DistrictStop {
   z: number;
   /** Mean unit direction of travel along the shapes at the stop, 0.01 precision. */
   dir: [number, number];
+  /** OSM maps a bus bay on the road at the stop, on its side of travel. */
+  bay?: true;
 }
 
 export type TransitMode = 'bus' | 'trolley' | 'minibus' | 'tram';

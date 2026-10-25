@@ -1,4 +1,5 @@
 import type { District } from '../city/district.js';
+import { markBusBays } from './bus-bays.js';
 import { emptyTransit, importGtfs } from './gtfs.js';
 import { DEPOT_SITES, importPlaces, type DepotSiteSpec } from './osm-places.js';
 import { boundsOfBBox, importRoads, type OsmElement } from './osm-roads.js';
@@ -19,6 +20,7 @@ export interface DistrictOptions {
 export function buildDistrict(elements: OsmElement[], opts: DistrictOptions): District {
   const roads = importRoads(elements, opts.bbox);
   const transit = opts.gtfs ? importGtfs(opts.gtfs, opts.bbox) : emptyTransit();
+  markBusBays(elements, transit.stops);
   const district: District = {
     meta: {
       id: opts.id,
