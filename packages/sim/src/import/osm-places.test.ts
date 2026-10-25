@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import type { DistrictRoads } from '../city/district.js';
 import { boundsOfBBox, importRoads, type OsmElement } from './osm-roads.js';
 import { DEPOT_SITES, importPlaces } from './osm-places.js';
@@ -116,9 +116,15 @@ describe('importPlaces', () => {
 const RAW = new URL('../../../../data/raw/osm/district.json', import.meta.url);
 
 describe.skipIf(!existsSync(RAW))('importPlaces on the real snapshot', () => {
-  const elements = (JSON.parse(readFileSync(RAW, 'utf8')) as { elements: OsmElement[] }).elements;
-  const roads = importRoads(elements, BELGRADE_BBOX);
-  const places = importPlaces(elements, BELGRADE_BBOX, roads, DEPOT_SITES);
+  // A skipped describe still runs its body: load the snapshot (outside git) only when its tests run.
+  let elements: OsmElement[];
+  let roads: DistrictRoads;
+  let places: ReturnType<typeof importPlaces>;
+  beforeAll(() => {
+    elements = (JSON.parse(readFileSync(RAW, 'utf8')) as { elements: OsmElement[] }).elements;
+    roads = importRoads(elements, BELGRADE_BBOX);
+    places = importPlaces(elements, BELGRADE_BBOX, roads, DEPOT_SITES);
+  });
 
   it('has the buildings, water, addresses, landmarks and depot lots of the centre', () => {
     expect(places.buildings.length).toBeGreaterThan(4800);
