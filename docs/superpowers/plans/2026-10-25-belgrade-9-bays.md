@@ -55,4 +55,4 @@
 ### Задача 5: доки, проверка, слияние
 **Файлы:** docs/SIMULATION.md, docs/DESIGN.md, docs/ROADMAP.md.
 - SIMULATION: карманы в «Общественный транспорт», съезд у бордюра в «Движение»; DESIGN — карман и зигзаг; ROADMAP — пункт карманов отмечен, этап «Белград» закрыт. Каждый файл до 100 строк.
-- [ ] pnpm test, pnpm build, pnpm lint (web) зелёные; коммит docs: bus bays; слияние в main fast-forward, тесты на main, ветка удалена.
+- [x] pnpm test, pnpm build, pnpm lint (web) зелёные; коммит docs: bus bays; слияние в main fast-forward, тесты на main, ветка удалена.
