@@ -20,3 +20,7 @@ data/raw/
 
 # Agent scratch output (road maps, timings)
 /tmp/
+
+# vendored agent skills: restore via skills-lock.json / `prisma skills sync`
+.claude/skills/
+apps/api/.claude/skills/
